@@ -128,10 +128,10 @@ export function PostCard({ post }: { post: PostListItem }) {
   }, [hovering, post.type, post.videoUrl, post.images.length, audioPref]);
 
   const isCarousel = post.type === "Sidecar" && post.images.length > 1;
-  const currentImg =
-    isCarousel && hovering
+  const currentImg: string | undefined =
+    (isCarousel && hovering
       ? imgProxy(post.images[carouselIdx])
-      : thumb;
+      : thumb) ?? undefined;
 
   return (
     <Link

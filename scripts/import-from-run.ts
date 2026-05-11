@@ -1,13 +1,9 @@
 // Importa posts desde el dataset de un Apify run que ya se ejecutó.
-// Útil cuando el actor terminó OK pero la persistencia falló (no recompila
-// ni cuesta créditos extra — solo lee del dataset existente).
 //
-// Uso:
-//   npm run import-run -- --runId=WiICsqwLs5KBKK5Kt --user=melisaescobarta
+// Uso: npm run import-run -- --runId=WiICsqwLs5KBKK5Kt --user=melisaescobarta
 
 import "dotenv/config";
 import { ApifyClient } from "apify-client";
-import { initSchema } from "../lib/db";
 import {
   normalize,
   upsertPosts,
@@ -43,7 +39,6 @@ function extractProfileFromItem(item: any): Partial<StoredProfile> {
 
 async function main() {
   const { runId, username } = parseArgs();
-  initSchema();
 
   const token = process.env.APIFY_TOKEN;
   if (!token) throw new Error("Falta APIFY_TOKEN");
@@ -66,14 +61,13 @@ async function main() {
   const normalized = apifyItems.map((it) =>
     normalize(it, scrapedAt, { sourceProfile: username })
   );
-  const { inserted, updated, failed } = upsertPosts(normalized);
+  const { inserted, updated, failed } = await upsertPosts(normalized);
 
-  // Profile metadata desde el primer item
   const sample = apifyItems[0] as any;
   const profileData = extractProfileFromItem(sample);
   const profileLang = inferLanguage(null, sample.caption ?? null);
 
-  upsertProfile({
+  await upsertProfile({
     username,
     fullName: profileData.fullName ?? null,
     bio: profileData.bio ?? null,
@@ -89,9 +83,9 @@ async function main() {
     scrapedAt,
   });
 
-  const baseline = recomputeProfileBaseline(username);
+  const baseline = await recomputeProfileBaseline(username);
 
-  recordScrapeRun({
+  await recordScrapeRun({
     hashtag: `profile:${username}`,
     startedAt: scrapedAt,
     finishedAt: scrapedAt,

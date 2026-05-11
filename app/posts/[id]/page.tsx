@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPostById } from "@/lib/queries";
+import { getTranscription } from "@/lib/transcription";
+import { getAdaptation } from "@/lib/adaptation";
 import { TierBadge, EngagementBadge } from "@/components/TierBadge";
 import { MediaViewer } from "@/components/MediaViewer";
 import { DecisionButtons } from "@/components/DecisionButtons";
 import { BackButton } from "@/components/BackButton";
+import { TranscribeButton } from "@/components/TranscribeButton";
+import { TranscriptionEditor } from "@/components/TranscriptionEditor";
+import { AdaptButton } from "@/components/AdaptButton";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 export default async function PostDetailPage({
   params,
@@ -14,11 +19,19 @@ export default async function PostDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const post = getPostById(id);
+  const post = await getPostById(id);
   if (!post) notFound();
 
   const plays = post.videoViewCount ?? post.videoPlayCount;
   const ageDays = ((Date.now() / 1000 - post.postedAt) / 86400).toFixed(1);
+  const transcription =
+    post.type === "Video" ? await getTranscription(post.id) : null;
+  const adaptation = transcription ? await getAdaptation(post.id) : null;
+  // Solo ofrecemos adaptación si el reel NO está en español. Si ya está en es,
+  // omitimos el botón (decisión explícita del usuario al elegir el alcance).
+  const sourceLang = transcription?.language ?? null;
+  const shouldOfferAdapt =
+    !!transcription && sourceLang !== "es" && !adaptation;
 
   return (
     <div className="flex flex-col gap-5">
@@ -61,6 +74,148 @@ export default async function PostDetailPage({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Transcripción (solo reels) */}
+          {post.type === "Video" && (
+            <div className="mt-4">
+              {transcription ? (
+                <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h3 className="text-xs uppercase tracking-wider text-neutral-500">
+                      📝 Transcripción
+                      {transcription.language && (
+                        <span className="ml-2 font-mono text-neutral-600">
+                          [{transcription.language}]
+                        </span>
+                      )}
+                    </h3>
+                    <span className="text-[11px] text-neutral-600">
+                      {new Date(
+                        transcription.transcribedAt * 1000,
+                      ).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <TranscriptionEditor
+                    postId={post.id}
+                    initialText={transcription.transcription}
+                    hasAdaptation={!!adaptation}
+                  />
+                  <div className="mt-3 border-t border-neutral-900 pt-3">
+                    <TranscribeButton postId={post.id} hasExisting />
+                  </div>
+                </div>
+              ) : post.videoUrl ? (
+                <TranscribeButton postId={post.id} hasExisting={false} />
+              ) : null}
+            </div>
+          )}
+
+          {/* Adaptación al español + anatomía (solo si hay transcripción no-es) */}
+          {shouldOfferAdapt && (
+            <div className="mt-4">
+              <AdaptButton
+                postId={post.id}
+                hasExisting={false}
+                sourceLang={sourceLang}
+              />
+            </div>
+          )}
+
+          {adaptation && (
+            <div className="mt-4 flex flex-col gap-3">
+              {/* Bloque 1 — Guión adaptado */}
+              <div className="rounded-lg border border-purple-900/50 bg-purple-950/20 p-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h3 className="text-xs uppercase tracking-wider text-purple-300">
+                    🎙️ Guión adaptado al español
+                  </h3>
+                  <span className="text-[11px] text-neutral-500">
+                    {adaptation.model} ·{" "}
+                    {new Date(
+                      adaptation.adaptedAt * 1000,
+                    ).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="whitespace-pre-line text-sm leading-relaxed text-neutral-100">
+                  {adaptation.result.adaptedScript}
+                </p>
+              </div>
+
+              {/* Bloque 2 — Anatomía */}
+              <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
+                <h3 className="mb-3 text-xs uppercase tracking-wider text-neutral-500">
+                  🧬 Anatomía del guión
+                </h3>
+                <div className="space-y-3 text-sm">
+                  <AnatomyRow
+                    icon="🎯"
+                    label="Hook (0-3s)"
+                    type={adaptation.result.hook.type}
+                    quote={adaptation.result.hook.quote}
+                  />
+                  <div>
+                    <div className="mb-1.5 text-xs font-semibold text-neutral-400">
+                      📖 Desarrollo
+                    </div>
+                    <ul className="ml-1 space-y-1 text-neutral-200">
+                      {adaptation.result.development.map((point, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="text-neutral-600">
+                            {i + 1}.
+                          </span>
+                          <span>{point}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <AnatomyRow
+                    icon="🎬"
+                    label="CTA / cierre"
+                    type={adaptation.result.cta.type}
+                    quote={adaptation.result.cta.quote}
+                  />
+                </div>
+              </div>
+
+              {/* Bloque 3 — Plantilla replicable */}
+              <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
+                <h3 className="mb-2 text-xs uppercase tracking-wider text-neutral-500">
+                  📋 Plantilla replicable
+                </h3>
+                <p className="whitespace-pre-line rounded bg-neutral-900 p-3 font-mono text-xs leading-relaxed text-emerald-200">
+                  {adaptation.result.template}
+                </p>
+              </div>
+
+              {/* Bloque 4 — Hooks alternativos */}
+              <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
+                <h3 className="mb-2 text-xs uppercase tracking-wider text-neutral-500">
+                  🎣 Hooks alternativos sobre el mismo tema
+                </h3>
+                <ol className="space-y-2 text-sm text-neutral-200">
+                  {adaptation.result.alternativeHooks.map((h, i) => (
+                    <li
+                      key={i}
+                      className="flex gap-3 border-l-2 border-purple-700/50 pl-3"
+                    >
+                      <span className="font-mono text-purple-400">
+                        {i + 1}.
+                      </span>
+                      <span>{h}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+
+              <div>
+                <AdaptButton
+                  postId={post.id}
+                  hasExisting
+                  sourceLang={sourceLang}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -223,4 +378,32 @@ function Row({
 function fmtCount(n: number | null | undefined): string {
   if (n == null || n < 0) return "—";
   return n.toLocaleString();
+}
+
+function AnatomyRow({
+  icon,
+  label,
+  type,
+  quote,
+}: {
+  icon: string;
+  label: string;
+  type: string;
+  quote: string;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline gap-2">
+        <span className="text-xs font-semibold text-neutral-400">
+          {icon} {label}
+        </span>
+        <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-neutral-300">
+          {type}
+        </span>
+      </div>
+      <blockquote className="border-l-2 border-neutral-700 pl-3 italic text-neutral-200">
+        &ldquo;{quote}&rdquo;
+      </blockquote>
+    </div>
+  );
 }

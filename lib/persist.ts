@@ -1,9 +1,11 @@
-// Normalización y persistencia: ApifyHashtagItem -> StoredPost en SQLite.
+// Normalización y persistencia: ApifyHashtagItem -> StoredPost en Postgres.
+// Multi-tenant: cada insert/update lleva workspace_id resuelto de getWorkspaceId().
 
 import type { ApifyHashtagItem, StoredPost, StoredProfile } from "./types";
 import { computeScores } from "./score";
 import { inferLanguage } from "./language";
-import { getDb } from "./db";
+import { getPool, getWorkspaceId } from "./db";
+import { getActiveNicheId } from "./niches";
 
 export interface NormalizeOptions {
   sourceHashtag?: string | null;
@@ -75,16 +77,21 @@ export function normalize(
     viewRate: scores.viewRate,
     viralVelocity: scores.viralVelocity,
     viralScore: scores.viralScore,
-    viralidadMultiplier: null, // se calcula post-scrape en lib/baseline.ts
+    viralidadMultiplier: null,
     viralTier: null,
 
     rawJson: JSON.stringify(item),
   };
 }
 
+// UPSERT con detección inserted vs updated via xmax (truco PG: xmax = 0 en
+// rows recién insertadas, != 0 en updated).
+//
+// niche_id solo se setea en INSERT — si el post ya existe (en otro nicho),
+// NO se mueve. Primera asignación gana, evita contaminar nichos cruzados.
 const UPSERT_SQL = `
 INSERT INTO posts (
-  id, short_code, url, type,
+  workspace_id, niche_id, id, short_code, url, type,
   owner_username, owner_full_name, owner_id,
   caption, hashtags, mentions, location_name,
   video_url, video_duration, images, display_url,
@@ -94,31 +101,32 @@ INSERT INTO posts (
   viral_velocity, engagement_score, engagement_rate, view_rate, viral_score,
   raw_json
 ) VALUES (
-  :id, :shortCode, :url, :type,
-  :ownerUsername, :ownerFullName, :ownerId,
-  :caption, :hashtags, :mentions, :locationName,
-  :videoUrl, :videoDuration, :images, :displayUrl,
-  :musicArtist, :musicTrack, :musicId,
-  :likesCount, :commentsCount, :videoViewCount, :videoPlayCount, :sharesCount,
-  :postedAt, :scrapedAt, :sourceHashtag, :sourceProfile, :language,
-  :viralVelocity, :engagementScore, :engagementRate, :viewRate, :viralScore,
-  :rawJson
+  $1, $2, $3, $4, $5, $6,
+  $7, $8, $9,
+  $10, $11, $12, $13,
+  $14, $15, $16, $17,
+  $18, $19, $20,
+  $21, $22, $23, $24, $25,
+  $26, $27, $28, $29, $30,
+  $31, $32, $33, $34, $35,
+  $36
 )
-ON CONFLICT(id) DO UPDATE SET
-  likes_count       = excluded.likes_count,
-  comments_count    = excluded.comments_count,
-  video_view_count  = excluded.video_view_count,
-  video_play_count  = excluded.video_play_count,
-  shares_count      = excluded.shares_count,
-  scraped_at        = excluded.scraped_at,
-  source_profile    = COALESCE(excluded.source_profile, posts.source_profile),
-  language          = COALESCE(posts.language, excluded.language),
-  viral_velocity    = excluded.viral_velocity,
-  engagement_score  = excluded.engagement_score,
-  engagement_rate   = excluded.engagement_rate,
-  view_rate         = excluded.view_rate,
-  viral_score       = excluded.viral_score,
-  raw_json          = excluded.raw_json
+ON CONFLICT (workspace_id, id) DO UPDATE SET
+  likes_count       = EXCLUDED.likes_count,
+  comments_count    = EXCLUDED.comments_count,
+  video_view_count  = EXCLUDED.video_view_count,
+  video_play_count  = EXCLUDED.video_play_count,
+  shares_count      = EXCLUDED.shares_count,
+  scraped_at        = EXCLUDED.scraped_at,
+  source_profile    = COALESCE(EXCLUDED.source_profile, posts.source_profile),
+  language          = COALESCE(posts.language, EXCLUDED.language),
+  viral_velocity    = EXCLUDED.viral_velocity,
+  engagement_score  = EXCLUDED.engagement_score,
+  engagement_rate   = EXCLUDED.engagement_rate,
+  view_rate         = EXCLUDED.view_rate,
+  viral_score       = EXCLUDED.viral_score,
+  raw_json          = EXCLUDED.raw_json
+RETURNING (xmax = 0) AS inserted
 `;
 
 export interface UpsertResult {
@@ -127,101 +135,37 @@ export interface UpsertResult {
   failed: number;
 }
 
-// Convierte un valor potencialmente conflictivo (BigInt, NaN, undefined) en
-// algo que node:sqlite acepta. Sanitiza preventivamente — el bug de
-// "parameter 299" en melisaescobarta vino de aquí.
-function sanitize(v: unknown): string | number | bigint | Buffer | null {
-  if (v === undefined || v === null) return null;
-  if (typeof v === "bigint") return v;
-  if (typeof v === "number") {
-    if (Number.isNaN(v) || !Number.isFinite(v)) return null;
-    return v;
-  }
-  if (typeof v === "string") return v;
-  if (typeof v === "boolean") return v ? 1 : 0;
-  // Cualquier otra cosa la stringificamos.
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return null;
-  }
-}
-
-export function upsertPosts(posts: StoredPost[]): UpsertResult {
-  const db = getDb();
-
+export async function upsertPosts(posts: StoredPost[]): Promise<UpsertResult> {
   if (posts.length === 0) return { inserted: 0, updated: 0, failed: 0 };
-
-  // Detección de existentes: query individual por id en vez de IN(?,?,...).
-  // Más calls pero mucho más robusto frente a un id problemático
-  // (un solo id corrupto rompía todo el IN). Es ~5 ms para 300 lookups.
-  const existing = new Set<string>();
-  const checkStmt = db.prepare("SELECT 1 FROM posts WHERE id = ? LIMIT 1");
-  for (const p of posts) {
-    try {
-      const id = sanitize(p.id);
-      if (id != null && checkStmt.get(id) != null) existing.add(p.id);
-    } catch {
-      // ignorar — si no podemos chequear, lo tratamos como nuevo
-    }
-  }
-
-  const stmt = db.prepare(UPSERT_SQL);
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const pool = getPool();
 
   let inserted = 0;
   let updated = 0;
   let failed = 0;
   const failures: Array<{ id: string; error: string }> = [];
 
-  // Sin transacción global — un row con valor problemático no debe
-  // hacer rollback de todo el batch. Trade-off: ~30% más lento, pero
-  // robusto.
   for (const p of posts) {
     try {
-      const params: Record<string, ReturnType<typeof sanitize>> = {
-        id: sanitize(p.id),
-        shortCode: sanitize(p.shortCode),
-        url: sanitize(p.url),
-        type: sanitize(p.type),
-        ownerUsername: sanitize(p.ownerUsername),
-        ownerFullName: sanitize(p.ownerFullName),
-        ownerId: sanitize(p.ownerId),
-        caption: sanitize(p.caption),
-        hashtags: sanitize(JSON.stringify(p.hashtags)),
-        mentions: sanitize(JSON.stringify(p.mentions)),
-        locationName: sanitize(p.locationName),
-        videoUrl: sanitize(p.videoUrl),
-        videoDuration: sanitize(p.videoDuration),
-        images: sanitize(JSON.stringify(p.images)),
-        displayUrl: sanitize(p.displayUrl),
-        musicArtist: sanitize(p.musicArtist),
-        musicTrack: sanitize(p.musicTrack),
-        musicId: sanitize(p.musicId),
-        likesCount: sanitize(p.likesCount),
-        commentsCount: sanitize(p.commentsCount),
-        videoViewCount: sanitize(p.videoViewCount),
-        videoPlayCount: sanitize(p.videoPlayCount),
-        sharesCount: sanitize(p.sharesCount),
-        postedAt: sanitize(p.postedAt),
-        scrapedAt: sanitize(p.scrapedAt),
-        sourceHashtag: sanitize(p.sourceHashtag),
-        sourceProfile: sanitize(p.sourceProfile),
-        language: sanitize(p.language),
-        viralVelocity: sanitize(p.viralVelocity),
-        engagementScore: sanitize(p.engagementScore),
-        engagementRate: sanitize(p.engagementRate),
-        viewRate: sanitize(p.viewRate),
-        viralScore: sanitize(p.viralScore),
-        rawJson: sanitize(p.rawJson),
-      };
-      stmt.run(params);
-      if (existing.has(p.id)) updated++;
-      else inserted++;
+      const res = await pool.query<{ inserted: boolean }>(UPSERT_SQL, [
+        wsId, nicheId, p.id, p.shortCode, p.url, p.type,
+        p.ownerUsername, p.ownerFullName, p.ownerId,
+        p.caption, p.hashtags ?? [], p.mentions ?? [], p.locationName,
+        p.videoUrl, p.videoDuration, p.images ?? [], p.displayUrl,
+        p.musicArtist, p.musicTrack, p.musicId,
+        p.likesCount ?? 0, p.commentsCount ?? 0, p.videoViewCount, p.videoPlayCount, p.sharesCount,
+        p.postedAt, p.scrapedAt, p.sourceHashtag, p.sourceProfile, p.language,
+        p.viralVelocity, p.engagementScore, p.engagementRate, p.viewRate, p.viralScore,
+        p.rawJson,
+      ]);
+      if (res.rows[0]?.inserted) inserted++;
+      else updated++;
     } catch (e) {
       failed++;
       failures.push({
         id: p.id,
-        error: String(e instanceof Error ? e.message : e),
+        error: e instanceof Error ? e.message : String(e),
       });
     }
   }
@@ -237,64 +181,77 @@ export function upsertPosts(posts: StoredPost[]): UpsertResult {
   return { inserted, updated, failed };
 }
 
-// Upsert de un perfil. Datos básicos vienen del scrape; los campos median_*
-// se rellenan después llamando a recomputeProfileBaseline().
-export function upsertProfile(profile: StoredProfile): void {
-  const db = getDb();
-  db.prepare(
-    `
-    INSERT INTO profiles (
-      username, full_name, bio, followers_count, following_count, posts_count,
-      profile_pic_url, is_verified, language,
-      median_engagement_score, median_engagement_rate, median_views,
-      scraped_at
-    ) VALUES (
-      :username, :fullName, :bio, :followersCount, :followingCount, :postsCount,
-      :profilePicUrl, :isVerified, :language,
-      :medianEngagementScore, :medianEngagementRate, :medianViews,
-      :scrapedAt
-    )
-    ON CONFLICT(username) DO UPDATE SET
-      full_name        = COALESCE(excluded.full_name, profiles.full_name),
-      bio              = COALESCE(excluded.bio, profiles.bio),
-      followers_count  = COALESCE(excluded.followers_count, profiles.followers_count),
-      following_count  = COALESCE(excluded.following_count, profiles.following_count),
-      posts_count      = COALESCE(excluded.posts_count, profiles.posts_count),
-      profile_pic_url  = COALESCE(excluded.profile_pic_url, profiles.profile_pic_url),
-      is_verified      = COALESCE(excluded.is_verified, profiles.is_verified),
-      language         = COALESCE(profiles.language, excluded.language),
-      scraped_at       = excluded.scraped_at
-  `
-  ).run({
-    username: profile.username,
-    fullName: profile.fullName,
-    bio: profile.bio,
-    followersCount: profile.followersCount,
-    followingCount: profile.followingCount,
-    postsCount: profile.postsCount,
-    profilePicUrl: profile.profilePicUrl,
-    isVerified: profile.isVerified == null ? null : profile.isVerified ? 1 : 0,
-    language: profile.language,
-    medianEngagementScore: profile.medianEngagementScore,
-    medianEngagementRate: profile.medianEngagementRate,
-    medianViews: profile.medianViews,
-    scrapedAt: profile.scrapedAt,
-  });
+export async function upsertProfile(profile: StoredProfile): Promise<void> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  await getPool().query(
+    `INSERT INTO profiles (
+       workspace_id, niche_id, username, full_name, bio,
+       followers_count, following_count, posts_count,
+       profile_pic_url, is_verified, language,
+       median_engagement_score, median_engagement_rate, median_views,
+       scraped_at
+     ) VALUES (
+       $1, $2, $3, $4, $5,
+       $6, $7, $8,
+       $9, $10, $11,
+       $12, $13, $14,
+       $15
+     )
+     ON CONFLICT (workspace_id, username) DO UPDATE SET
+       full_name        = COALESCE(EXCLUDED.full_name, profiles.full_name),
+       bio              = COALESCE(EXCLUDED.bio, profiles.bio),
+       followers_count  = COALESCE(EXCLUDED.followers_count, profiles.followers_count),
+       following_count  = COALESCE(EXCLUDED.following_count, profiles.following_count),
+       posts_count      = COALESCE(EXCLUDED.posts_count, profiles.posts_count),
+       profile_pic_url  = COALESCE(EXCLUDED.profile_pic_url, profiles.profile_pic_url),
+       is_verified      = COALESCE(EXCLUDED.is_verified, profiles.is_verified),
+       language         = COALESCE(profiles.language, EXCLUDED.language),
+       scraped_at       = EXCLUDED.scraped_at`,
+    [
+      wsId,
+      nicheId,
+      profile.username,
+      profile.fullName,
+      profile.bio,
+      profile.followersCount,
+      profile.followingCount,
+      profile.postsCount,
+      profile.profilePicUrl,
+      profile.isVerified,
+      profile.language,
+      profile.medianEngagementScore,
+      profile.medianEngagementRate,
+      profile.medianViews,
+      profile.scrapedAt,
+    ]
+  );
 }
 
-export function recordScrapeRun(args: {
+export async function recordScrapeRun(args: {
   hashtag: string | null;
   startedAt: number;
   finishedAt: number | null;
   itemsCount: number | null;
   apifyRunId: string | null;
   error: string | null;
-}): number {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO scrape_runs (hashtag, started_at, finished_at, items_count, apify_run_id, error)
-    VALUES (:hashtag, :startedAt, :finishedAt, :itemsCount, :apifyRunId, :error)
-  `);
-  const info = stmt.run(args);
-  return Number(info.lastInsertRowid);
+}): Promise<number> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const res = await getPool().query<{ id: number }>(
+    `INSERT INTO scrape_runs (workspace_id, niche_id, hashtag, started_at, finished_at, items_count, apify_run_id, error)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id`,
+    [
+      wsId,
+      nicheId,
+      args.hashtag,
+      args.startedAt,
+      args.finishedAt,
+      args.itemsCount,
+      args.apifyRunId,
+      args.error,
+    ]
+  );
+  return res.rows[0].id;
 }

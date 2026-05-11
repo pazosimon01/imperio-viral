@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const types: ResultsType[] =
       typeArg === "both" ? ["posts", "reels"] : [typeArg];
 
-    const jobId = createJob(
+    const jobId = await createJob(
       "hashtag",
       { hashtag, limit, types },
       `Buscar #${hashtag} (${types.join("+")}, ${limit} c/u)`
@@ -53,7 +53,7 @@ async function runJob(
   try {
     for (let i = 0; i < types.length; i++) {
       const t = types[i];
-      updateJobMessage(
+      await updateJobMessage(
         jobId,
         `[${i + 1}/${types.length}] #${hashtag} (${t})…`
       );
@@ -72,12 +72,12 @@ async function runJob(
         });
       }
     }
-    finishJob(jobId, "done", {
+    await finishJob(jobId, "done", {
       result: summary,
       message: `Listo — #${hashtag}`,
     });
   } catch (e) {
-    finishJob(jobId, "failed", {
+    await finishJob(jobId, "failed", {
       error: e instanceof Error ? e.message : String(e),
       result: summary,
     });

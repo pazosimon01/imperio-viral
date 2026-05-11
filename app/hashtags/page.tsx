@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   getAllHashtagsWithCounts,
   queryPosts,
+  POSTS_PAGE_SIZE,
   type HeatLevel,
   type PostType,
   type SortKey,
@@ -11,8 +12,9 @@ import { FilterBar } from "@/components/FilterBar";
 import { HashtagPills } from "@/components/HashtagPills";
 import { PostCard } from "@/components/PostCard";
 import { EnrichSection } from "@/components/EnrichSection";
+import { Pagination } from "@/components/Pagination";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 interface SearchParams {
   tag?: string;
@@ -23,6 +25,7 @@ interface SearchParams {
   heat?: string;
   decision?: string;
   sort?: string;
+  page?: string;
 }
 
 export default async function HashtagsPage({
@@ -33,7 +36,7 @@ export default async function HashtagsPage({
   const sp = await searchParams;
   const selectedTag = sp.tag ?? null;
 
-  const allHashtags = getAllHashtagsWithCounts();
+  const allHashtags = await getAllHashtagsWithCounts();
   const totalAcrossAll = allHashtags.reduce((sum, h) => sum + h.totalPosts, 0);
 
   // sp.window === "all"  → sin filtro temporal
@@ -47,7 +50,8 @@ export default async function HashtagsPage({
     recentDays = Number.isFinite(n) && n > 0 ? n : 90;
   }
 
-  const posts = queryPosts({
+  const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const { posts, hasMore } = await queryPosts({
     sourceHashtag: selectedTag ?? "any",
     recentDays,
     language: sp.lang as any,
@@ -58,6 +62,7 @@ export default async function HashtagsPage({
     // Default: viralScore funciona para todos los tipos (combina velocidad
     // y engagement, asigna NULL solo si no hay nada calculable).
     sort: (sp.sort as SortKey) ?? "viralScore",
+    page,
   });
 
   const selectedHashtag = selectedTag
@@ -185,29 +190,21 @@ export default async function HashtagsPage({
             </div>
           )}
 
-          <div className="text-sm text-neutral-400">
-            Mostrando <strong className="text-white">{posts.length}</strong>{" "}
-            posts
-            {selectedTag ? (
-              <>
-                {" "}
-                de <strong className="text-purple-300">#{selectedTag}</strong>
-              </>
-            ) : (
-              " de todos los hashtags"
-            )}
-          </div>
-
           {posts.length === 0 ? (
             <div className="rounded-lg border border-dashed border-neutral-800 p-8 text-center">
               <p className="text-neutral-300">
-                Sin resultados con los filtros actuales.
+                {page > 1
+                  ? "No hay más resultados en esta página."
+                  : "Sin resultados con los filtros actuales."}
               </p>
-              <p className="mt-2 text-xs text-neutral-500">
-                Prueba: cambiar la ventana a <strong>"Todo el histórico"</strong>,
-                quitar el filtro de <strong>tier</strong>, o cambiar el orden a{" "}
-                <strong>"Engagement %"</strong>.
-              </p>
+              {page === 1 && (
+                <p className="mt-2 text-xs text-neutral-500">
+                  Prueba: cambiar la ventana a{" "}
+                  <strong>"Todo el histórico"</strong>, quitar el filtro de{" "}
+                  <strong>tier</strong>, o cambiar el orden a{" "}
+                  <strong>"Engagement %"</strong>.
+                </p>
+              )}
               <Link
                 href={`/hashtags${selectedTag ? `?tag=${selectedTag}` : ""}`}
                 className="mt-3 inline-block rounded border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 hover:border-neutral-500 hover:bg-neutral-800"
@@ -216,11 +213,19 @@ export default async function HashtagsPage({
               </Link>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {posts.map((p) => (
-                <PostCard key={p.id} post={p} />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {posts.map((p) => (
+                  <PostCard key={p.id} post={p} />
+                ))}
+              </div>
+              <Pagination
+                page={page}
+                hasMore={hasMore}
+                pageSize={POSTS_PAGE_SIZE}
+                itemsThisPage={posts.length}
+              />
+            </>
           )}
         </>
       )}

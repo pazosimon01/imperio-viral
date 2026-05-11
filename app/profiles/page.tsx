@@ -2,10 +2,10 @@ import Link from "next/link";
 import { getAllProfiles } from "@/lib/queries";
 import { imgProxy } from "@/lib/img";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
-export default function ProfilesIndexPage() {
-  const profiles = getAllProfiles();
+export default async function ProfilesIndexPage() {
+  const profiles = await getAllProfiles();
 
   return (
     <div className="flex flex-col gap-5">

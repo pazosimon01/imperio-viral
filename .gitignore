@@ -17,3 +17,7 @@ Thumbs.db
 *.log
 .vscode/
 .idea/
+
+# Build artifacts
+*.tsbuildinfo
+/tmp/

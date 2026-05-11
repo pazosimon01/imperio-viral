@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { queryOne, getWorkspaceId } from "@/lib/db";
+import { getActiveNicheId } from "@/lib/niches";
 
 export const runtime = "nodejs";
 
-// Devuelve info del hashtag para mostrar warning antes de scrapear:
-//   - cuántos posts ya tenemos de ese hashtag
-//   - cuándo fue el último scrape
-//   - estimación de "% probable de duplicados" (si fue reciente)
+// Info del hashtag para warning antes de scrapear: cuántos posts ya tenemos
+// y % estimado de duplicados según cuándo fue el último scrape.
 export async function GET(req: NextRequest) {
   const tag = (req.nextUrl.searchParams.get("tag") ?? "")
     .trim()
@@ -16,25 +15,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ tag: "", exists: false }, { status: 200 });
   }
 
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT
-         COUNT(*)              AS posts_count,
-         MAX(scraped_at)       AS last_scraped_at
-       FROM posts
-       WHERE source_hashtag = ?`
-    )
-    .get(tag) as { posts_count: number; last_scraped_at: number | null };
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const row = await queryOne<{
+    posts_count: number;
+    last_scraped_at: number | null;
+  }>(
+    `SELECT
+       COUNT(*)::int    AS posts_count,
+       MAX(scraped_at)  AS last_scraped_at
+     FROM posts
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_hashtag = $3`,
+    [wsId, nicheId, tag],
+  );
 
-  const exists = (row.posts_count ?? 0) > 0;
-  const daysAgo = row.last_scraped_at
-    ? (Date.now() / 1000 - row.last_scraped_at) / 86400
+  const postsCount = row?.posts_count ?? 0;
+  const lastScrapedAt = row?.last_scraped_at ?? null;
+  const exists = postsCount > 0;
+  const daysAgo = lastScrapedAt
+    ? (Date.now() / 1000 - lastScrapedAt) / 86400
     : null;
 
-  // Estimación grosera del % de duplicados que devolvería Apify si rescrapas
-  // ahora. Basado en heurística de feeds de hashtag — cambian poco día a día
-  // para hashtags maduros, mucho para hashtags pequeños o de noticias.
   let estimatedOverlapPct: number | null = null;
   if (daysAgo != null) {
     if (daysAgo < 1) estimatedOverlapPct = 90;
@@ -47,8 +48,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     tag,
     exists,
-    postsCount: row.posts_count ?? 0,
-    lastScrapedAt: row.last_scraped_at,
+    postsCount,
+    lastScrapedAt,
     daysAgo,
     estimatedOverlapPct,
   });

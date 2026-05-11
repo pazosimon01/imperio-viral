@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AudioToggle } from "@/components/AudioToggle";
+import { ApifyUsageBadge } from "@/components/ApifyUsageBadge";
+import { NicheSelector } from "@/components/NicheSelector";
+import { listNiches, getActiveNiche } from "@/lib/niches";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,11 +11,13 @@ export const metadata: Metadata = {
   description: "Análisis de virales y tendencias en Instagram para creadores y agencias",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const [niches, active] = await Promise.all([listNiches(), getActiveNiche()]);
+
   return (
     <html lang="es">
       <body>
@@ -56,7 +61,11 @@ export default function RootLayout({
                 Shortlist
               </Link>
             </nav>
-            <AudioToggle />
+            <div className="ml-auto flex items-center gap-3">
+              <NicheSelector niches={niches} activeSlug={active.slug} />
+              <ApifyUsageBadge />
+              <AudioToggle />
+            </div>
           </div>
         </header>
         <main className="mx-auto max-w-7xl px-6 py-6">{children}</main>

@@ -1,7 +1,7 @@
-// Queries server-side reutilizadas por páginas de Next.js.
-// Acceden directamente a SQLite (estamos local, sin red).
+// Queries server-side reutilizadas por páginas de Next.js. Postgres + multi-tenant.
 
-import { getDb } from "./db";
+import { query, queryOne, getWorkspaceId } from "./db";
+import { getActiveNicheId } from "./niches";
 import type { ViralTier, Decision } from "./types";
 
 const DAY = 86400;
@@ -24,37 +24,36 @@ export interface ProfileSummary {
   medianEngagementRate: number | null;
   medianViews: number | null;
   scrapedAt: number;
-  // Derivado
   totalPostsInDb: number;
   taggedPostsCount: number;
 }
 
-export function getAllProfiles(): ProfileSummary[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT p.*,
-              (SELECT COUNT(*) FROM posts WHERE source_profile = p.username) AS total_posts,
-              (SELECT COUNT(*) FROM posts WHERE source_profile = p.username AND viral_tier IS NOT NULL) AS tagged_posts
-       FROM profiles p
-       ORDER BY p.followers_count DESC NULLS LAST`
-    )
-    .all() as any[];
-
+export async function getAllProfiles(): Promise<ProfileSummary[]> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const rows = await query<any>(
+    `SELECT p.*,
+            (SELECT COUNT(*) FROM posts WHERE workspace_id = p.workspace_id AND niche_id = p.niche_id AND source_profile = p.username) AS total_posts,
+            (SELECT COUNT(*) FROM posts WHERE workspace_id = p.workspace_id AND niche_id = p.niche_id AND source_profile = p.username AND viral_tier IS NOT NULL) AS tagged_posts
+     FROM profiles p
+     WHERE p.workspace_id = $1 AND p.niche_id = $2
+     ORDER BY p.followers_count DESC NULLS LAST`,
+    [wsId, nicheId]
+  );
   return rows.map(rowToProfileSummary);
 }
 
-export function getProfile(username: string): ProfileSummary | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT p.*,
-              (SELECT COUNT(*) FROM posts WHERE source_profile = p.username) AS total_posts,
-              (SELECT COUNT(*) FROM posts WHERE source_profile = p.username AND viral_tier IS NOT NULL) AS tagged_posts
-       FROM profiles p
-       WHERE p.username = ?`
-    )
-    .get(username.toLowerCase()) as any;
+export async function getProfile(username: string): Promise<ProfileSummary | null> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const row = await queryOne<any>(
+    `SELECT p.*,
+            (SELECT COUNT(*) FROM posts WHERE workspace_id = p.workspace_id AND niche_id = p.niche_id AND source_profile = p.username) AS total_posts,
+            (SELECT COUNT(*) FROM posts WHERE workspace_id = p.workspace_id AND niche_id = p.niche_id AND source_profile = p.username AND viral_tier IS NOT NULL) AS tagged_posts
+     FROM profiles p
+     WHERE p.workspace_id = $1 AND p.niche_id = $2 AND p.username = $3`,
+    [wsId, nicheId, username.toLowerCase()]
+  );
   return row ? rowToProfileSummary(row) : null;
 }
 
@@ -73,8 +72,8 @@ function rowToProfileSummary(r: any): ProfileSummary {
     medianEngagementRate: r.median_engagement_rate,
     medianViews: r.median_views,
     scrapedAt: r.scraped_at,
-    totalPostsInDb: r.total_posts,
-    taggedPostsCount: r.tagged_posts,
+    totalPostsInDb: Number(r.total_posts),
+    taggedPostsCount: Number(r.tagged_posts),
   };
 }
 
@@ -84,12 +83,12 @@ function rowToProfileSummary(r: any): ProfileSummary {
 
 export type PostType = "Image" | "Sidecar" | "Video";
 export type SortKey =
-  | "viralScore" // combinado, funciona para todos los tipos
+  | "viralScore"
   | "viralidadMultiplier"
   | "engagementRate"
   | "viralVelocity"
   | "engagementScore"
-  | "viewsPerFollower" // joyas ocultas: cuentas chicas con reel viral
+  | "viewsPerFollower"
   | "postedAt"
   | "videoViewCount";
 
@@ -103,23 +102,23 @@ const HEAT_MIN_ER: Record<HeatLevel, number> = {
 };
 
 export interface PostFilters {
-  recentDays?: number; // null = sin filtro
-  // "supported" filtra a posts donde language IN ('es','en','pt')
-  // (excluye 'other' y null). Útil para descartar francés, hindi, etc.
+  recentDays?: number;
   language?: "es" | "en" | "pt" | "supported" | null;
-  types?: PostType[]; // si vacío, todos
+  types?: PostType[];
   minTier?: ViralTier | null;
-  // Calor mínimo basado en engagement_rate (%). Solo aplica a reels (sin
-  // ER no hay clasificación). Si está activo, los posts/carruseles quedan
-  // excluidos automáticamente.
   minHeat?: HeatLevel | null;
-  decision?: Decision | "none" | null; // 'none' = sin decisión aún
+  decision?: Decision | "none" | null;
   sort?: SortKey;
-  // Filtro por origen del scrape:
-  //   "any"        → cualquier post que vino de un hashtag scrape
-  //   "<hashtag>"  → solo de ese hashtag específico
-  //   null/undef   → sin filtro
   sourceHashtag?: string | "any" | null;
+  page?: number; // 1-indexed
+}
+
+export const POSTS_PAGE_SIZE = 60;
+
+export interface PostsPage {
+  posts: PostListItem[];
+  page: number;
+  hasMore: boolean;
 }
 
 export interface PostListItem {
@@ -151,8 +150,6 @@ export interface PostListItem {
   viralTier: ViralTier | null;
   hashtagHeatMult: number | null;
   hashtagHeatTier: HeatLevel | null;
-  // Conteo de followers del autor (si lo conocemos) y ratio views/followers.
-  // Útil para detectar "joyas ocultas": cuentas pequeñas con reels viralizando.
   ownerFollowersCount: number | null;
   viewsPerFollower: number | null;
   postedAt: number;
@@ -163,10 +160,10 @@ export interface PostListItem {
   decisionNotes: string | null;
 }
 
-export function getProfilePosts(
+export async function getProfilePosts(
   username: string,
   filters: PostFilters
-): PostListItem[] {
+): Promise<PostsPage> {
   return queryPosts({ ...filters, sourceProfile: username });
 }
 
@@ -174,61 +171,62 @@ interface InternalQueryFilters extends PostFilters {
   sourceProfile?: string;
 }
 
-export function queryPosts(filters: InternalQueryFilters): PostListItem[] {
-  const db = getDb();
-  const where: string[] = ["1=1"];
+export async function queryPosts(
+  filters: InternalQueryFilters
+): Promise<PostsPage> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
   const params: any[] = [];
+  const addParam = (v: any): string => {
+    params.push(v);
+    return `$${params.length}`;
+  };
+
+  const where: string[] = [
+    `p.workspace_id = ${addParam(wsId)}`,
+    `p.niche_id = ${addParam(nicheId)}`,
+  ];
 
   if (filters.sourceProfile) {
-    where.push("p.source_profile = ?");
-    params.push(filters.sourceProfile.toLowerCase());
+    where.push(`p.source_profile = ${addParam(filters.sourceProfile.toLowerCase())}`);
   }
 
   if (filters.sourceHashtag === "any") {
     where.push("p.source_hashtag IS NOT NULL");
   } else if (filters.sourceHashtag) {
-    where.push("p.source_hashtag = ?");
-    params.push(filters.sourceHashtag.toLowerCase());
+    where.push(`p.source_hashtag = ${addParam(filters.sourceHashtag.toLowerCase())}`);
   }
 
   if (filters.recentDays != null) {
     const cutoff = Math.floor(Date.now() / 1000) - filters.recentDays * DAY;
-    where.push("p.posted_at > ?");
-    params.push(cutoff);
+    where.push(`p.posted_at > ${addParam(cutoff)}`);
   }
 
   if (filters.language === "supported") {
     where.push("p.language IN ('es','en','pt')");
   } else if (filters.language) {
-    where.push("p.language = ?");
-    params.push(filters.language);
+    where.push(`p.language = ${addParam(filters.language)}`);
   }
 
   if (filters.types && filters.types.length > 0) {
-    where.push(
-      `p.type IN (${filters.types.map(() => "?").join(",")})`
-    );
-    params.push(...filters.types);
+    where.push(`p.type = ANY(${addParam(filters.types)})`);
   }
 
   if (filters.minTier) {
     const order: ViralTier[] = ["good", "viral", "gem", "diamond", "unicorn"];
     const minIdx = order.indexOf(filters.minTier);
     const allowed = order.slice(minIdx);
-    where.push(`p.viral_tier IN (${allowed.map(() => "?").join(",")})`);
-    params.push(...allowed);
+    where.push(`p.viral_tier = ANY(${addParam(allowed)})`);
   }
 
   if (filters.minHeat) {
-    where.push("p.engagement_rate >= ?");
-    params.push(HEAT_MIN_ER[filters.minHeat]);
+    where.push(`p.engagement_rate >= ${addParam(HEAT_MIN_ER[filters.minHeat])}`);
   }
 
   if (filters.decision === "none") {
     where.push("d.decision IS NULL");
   } else if (filters.decision) {
-    where.push("d.decision = ?");
-    params.push(filters.decision);
+    where.push(`d.decision = ${addParam(filters.decision)}`);
   }
 
   const sortKey = filters.sort ?? "viralidadMultiplier";
@@ -239,61 +237,83 @@ export function queryPosts(filters: InternalQueryFilters): PostListItem[] {
     viralVelocity: "p.viral_velocity DESC NULLS LAST",
     engagementScore: "p.engagement_score DESC NULLS LAST",
     viewsPerFollower:
-      "(CAST(COALESCE(p.video_view_count, p.video_play_count) AS REAL) / NULLIF(COALESCE(pr1.followers_count, pr2.followers_count), 0)) DESC NULLS LAST",
+      "(COALESCE(p.video_view_count, p.video_play_count)::double precision / NULLIF(COALESCE(pr1.followers_count, pr2.followers_count), 0)) DESC NULLS LAST",
     postedAt: "p.posted_at DESC",
     videoViewCount:
       "COALESCE(p.video_view_count, p.video_play_count) DESC NULLS LAST",
   };
 
-  // Tiebreakers: si el campo primario es NULL para muchos posts, queremos
-  // un orden secundario sensato (engagement_score y fecha) en vez de aleatorio.
+  // Paginación: pedimos PAGE_SIZE + 1 para detectar si hay más sin necesidad
+  // de un COUNT(*) extra. Slice al final si trajo PAGE_SIZE + 1.
+  const page = Math.max(1, filters.page ?? 1);
+  const offset = (page - 1) * POSTS_PAGE_SIZE;
+  const limitParam = addParam(POSTS_PAGE_SIZE + 1);
+  const offsetParam = addParam(offset);
+
+  // Importante: NO traer p.raw_json acá — son ~10KB por row × 500 = 5MB
+  // que tarda 4-5s en transferirse. Lista columnas explícitas.
   const sql = `
-    SELECT p.*,
+    SELECT p.id, p.short_code, p.url, p.type,
+           p.owner_username, p.owner_full_name,
+           p.caption, p.hashtags, p.images, p.display_url, p.video_url,
+           p.likes_count, p.comments_count, p.video_view_count, p.video_play_count,
+           p.shares_count, p.video_duration, p.music_artist, p.music_track,
+           p.engagement_score, p.engagement_rate, p.view_rate, p.viral_velocity,
+           p.viral_score, p.viralidad_multiplier, p.viral_tier,
+           p.hashtag_heat_mult, p.hashtag_heat_tier,
+           p.posted_at, p.language, p.source_profile, p.source_hashtag,
            d.decision AS decision,
            d.notes    AS decision_notes,
            COALESCE(pr1.followers_count, pr2.followers_count) AS owner_followers
     FROM posts p
-    LEFT JOIN decisions d  ON d.post_id = p.id
-    LEFT JOIN profiles pr1 ON LOWER(pr1.username) = LOWER(p.source_profile)
-    LEFT JOIN profiles pr2 ON LOWER(pr2.username) = LOWER(p.owner_username)
+    LEFT JOIN decisions d
+           ON d.workspace_id = p.workspace_id AND d.post_id = p.id
+    LEFT JOIN profiles pr1
+           ON pr1.workspace_id = p.workspace_id AND pr1.niche_id = p.niche_id AND LOWER(pr1.username) = LOWER(p.source_profile)
+    LEFT JOIN profiles pr2
+           ON pr2.workspace_id = p.workspace_id AND pr2.niche_id = p.niche_id AND LOWER(pr2.username) = LOWER(p.owner_username)
     WHERE ${where.join(" AND ")}
     ORDER BY ${orderBy[sortKey]},
              p.engagement_score DESC NULLS LAST,
              p.posted_at DESC
-    LIMIT 500
+    LIMIT ${limitParam} OFFSET ${offsetParam}
   `;
 
-  const rows = db.prepare(sql).all(...params) as any[];
-  return rows.map(rowToPost);
+  const rows = await query<any>(sql, params);
+  const hasMore = rows.length > POSTS_PAGE_SIZE;
+  const sliced = hasMore ? rows.slice(0, POSTS_PAGE_SIZE) : rows;
+  return {
+    posts: sliced.map(rowToPost),
+    page,
+    hasMore,
+  };
 }
 
-export function getPostById(id: string): PostListItem | null {
-  const db = getDb();
-  const row = db
-    .prepare(
-      `SELECT p.*,
-              d.decision AS decision,
-              d.notes    AS decision_notes,
-              COALESCE(pr1.followers_count, pr2.followers_count) AS owner_followers
-       FROM posts p
-       LEFT JOIN decisions d  ON d.post_id = p.id
-       LEFT JOIN profiles pr1 ON LOWER(pr1.username) = LOWER(p.source_profile)
-       LEFT JOIN profiles pr2 ON LOWER(pr2.username) = LOWER(p.owner_username)
-       WHERE p.id = ?`
-    )
-    .get(id) as any;
+export async function getPostById(id: string): Promise<PostListItem | null> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const row = await queryOne<any>(
+    `SELECT p.*,
+            d.decision AS decision,
+            d.notes    AS decision_notes,
+            COALESCE(pr1.followers_count, pr2.followers_count) AS owner_followers
+     FROM posts p
+     LEFT JOIN decisions d
+            ON d.workspace_id = p.workspace_id AND d.post_id = p.id
+     LEFT JOIN profiles pr1
+            ON pr1.workspace_id = p.workspace_id AND pr1.niche_id = p.niche_id AND LOWER(pr1.username) = LOWER(p.source_profile)
+     LEFT JOIN profiles pr2
+            ON pr2.workspace_id = p.workspace_id AND pr2.niche_id = p.niche_id AND LOWER(pr2.username) = LOWER(p.owner_username)
+     WHERE p.workspace_id = $1 AND p.niche_id = $2 AND p.id = $3`,
+    [wsId, nicheId, id]
+  );
   return row ? rowToPost(row) : null;
 }
 
 function rowToPost(r: any): PostListItem {
-  let images: string[] = [];
-  let hashtags: string[] = [];
-  try {
-    images = JSON.parse(r.images || "[]");
-  } catch {}
-  try {
-    hashtags = JSON.parse(r.hashtags || "[]");
-  } catch {}
+  // text[] columns vienen como JS arrays directos; jsonb como objetos.
+  const images: string[] = Array.isArray(r.images) ? r.images : [];
+  const hashtags: string[] = Array.isArray(r.hashtags) ? r.hashtags : [];
 
   return {
     id: r.id,
@@ -344,24 +364,28 @@ function rowToPost(r: any): PostListItem {
 // DECISIONS
 // ─────────────────────────────────────────────────────────────
 
-export function setDecision(
+export async function setDecision(
   postId: string,
   decision: Decision | null,
   notes?: string | null
-): void {
-  const db = getDb();
+): Promise<void> {
+  const wsId = getWorkspaceId();
   if (decision === null) {
-    db.prepare("DELETE FROM decisions WHERE post_id = ?").run(postId);
+    await query(
+      `DELETE FROM decisions WHERE workspace_id = $1 AND post_id = $2`,
+      [wsId, postId]
+    );
     return;
   }
-  db.prepare(
-    `INSERT INTO decisions (post_id, decision, notes, decided_at)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(post_id) DO UPDATE SET
-       decision   = excluded.decision,
-       notes      = COALESCE(excluded.notes, decisions.notes),
-       decided_at = excluded.decided_at`
-  ).run(postId, decision, notes ?? null, Math.floor(Date.now() / 1000));
+  await query(
+    `INSERT INTO decisions (workspace_id, post_id, decision, notes, decided_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (workspace_id, post_id) DO UPDATE SET
+       decision   = EXCLUDED.decision,
+       notes      = COALESCE(EXCLUDED.notes, decisions.notes),
+       decided_at = EXCLUDED.decided_at`,
+    [wsId, postId, decision, notes ?? null, Math.floor(Date.now() / 1000)]
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -378,32 +402,32 @@ export interface HashtagSummary {
   lastScrapedAt: number;
 }
 
-export function getAllHashtagsWithCounts(): HashtagSummary[] {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT
-         source_hashtag AS hashtag,
-         COUNT(*) AS total_posts,
-         COUNT(CASE WHEN viral_tier IS NOT NULL THEN 1 END) AS tagged_posts,
-         COUNT(CASE WHEN type = 'Video'   THEN 1 END) AS reels,
-         COUNT(CASE WHEN type = 'Sidecar' THEN 1 END) AS carousels,
-         COUNT(CASE WHEN type = 'Image'   THEN 1 END) AS images,
-         MAX(scraped_at) AS last_scraped_at
-       FROM posts
-       WHERE source_hashtag IS NOT NULL
-       GROUP BY source_hashtag
-       ORDER BY total_posts DESC`
-    )
-    .all() as any[];
+export async function getAllHashtagsWithCounts(): Promise<HashtagSummary[]> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const rows = await query<any>(
+    `SELECT
+       source_hashtag AS hashtag,
+       COUNT(*) AS total_posts,
+       COUNT(*) FILTER (WHERE viral_tier IS NOT NULL) AS tagged_posts,
+       COUNT(*) FILTER (WHERE type = 'Video')   AS reels,
+       COUNT(*) FILTER (WHERE type = 'Sidecar') AS carousels,
+       COUNT(*) FILTER (WHERE type = 'Image')   AS images,
+       MAX(scraped_at) AS last_scraped_at
+     FROM posts
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_hashtag IS NOT NULL
+     GROUP BY source_hashtag
+     ORDER BY total_posts DESC`,
+    [wsId, nicheId]
+  );
 
   return rows.map((r) => ({
     hashtag: r.hashtag,
-    totalPosts: r.total_posts,
-    taggedPosts: r.tagged_posts,
-    reels: r.reels,
-    carousels: r.carousels,
-    images: r.images,
+    totalPosts: Number(r.total_posts),
+    taggedPosts: Number(r.tagged_posts),
+    reels: Number(r.reels),
+    carousels: Number(r.carousels),
+    images: Number(r.images),
     lastScrapedAt: r.last_scraped_at,
   }));
 }
@@ -424,33 +448,48 @@ export interface GlobalStats {
   decisionsCount: { replicate: number; maybe: number; skip: number };
 }
 
-export function getGlobalStats(): GlobalStats {
-  const db = getDb();
+export async function getGlobalStats(): Promise<GlobalStats> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
 
-  const totalProfiles = (
-    db.prepare("SELECT COUNT(*) AS n FROM profiles").get() as { n: number }
-  ).n;
-
-  const typeRows = db
-    .prepare("SELECT type, COUNT(*) AS n FROM posts GROUP BY type")
-    .all() as Array<{ type: string; n: number }>;
+  // decisions no tiene niche_id directamente; las filtramos por post para
+  // que solo cuenten decisiones sobre posts del nicho activo.
+  const [profilesRow, typeRows, taggedRow, tierRows, langRows, decisionRows] =
+    await Promise.all([
+      queryOne<{ n: number }>(
+        "SELECT COUNT(*)::int AS n FROM profiles WHERE workspace_id = $1 AND niche_id = $2",
+        [wsId, nicheId]
+      ),
+      query<{ type: string; n: number }>(
+        "SELECT type, COUNT(*)::int AS n FROM posts WHERE workspace_id = $1 AND niche_id = $2 GROUP BY type",
+        [wsId, nicheId]
+      ),
+      queryOne<{ n: number }>(
+        "SELECT COUNT(*)::int AS n FROM posts WHERE workspace_id = $1 AND niche_id = $2 AND viral_tier IS NOT NULL",
+        [wsId, nicheId]
+      ),
+      query<{ tier: ViralTier; n: number }>(
+        "SELECT viral_tier AS tier, COUNT(*)::int AS n FROM posts WHERE workspace_id = $1 AND niche_id = $2 AND viral_tier IS NOT NULL GROUP BY viral_tier",
+        [wsId, nicheId]
+      ),
+      query<{ lang: string; n: number }>(
+        "SELECT COALESCE(language, '?') AS lang, COUNT(*)::int AS n FROM posts WHERE workspace_id = $1 AND niche_id = $2 GROUP BY language ORDER BY n DESC",
+        [wsId, nicheId]
+      ),
+      query<{ decision: Decision; n: number }>(
+        `SELECT d.decision, COUNT(*)::int AS n
+         FROM decisions d
+         JOIN posts p ON p.workspace_id = d.workspace_id AND p.id = d.post_id
+         WHERE d.workspace_id = $1 AND p.niche_id = $2
+         GROUP BY d.decision`,
+        [wsId, nicheId]
+      ),
+    ]);
 
   const totalPosts = typeRows.reduce((s, r) => s + r.n, 0);
   const totalReels = typeRows.find((r) => r.type === "Video")?.n ?? 0;
   const totalCarousels = typeRows.find((r) => r.type === "Sidecar")?.n ?? 0;
   const totalImages = typeRows.find((r) => r.type === "Image")?.n ?? 0;
-
-  const taggedPosts = (
-    db
-      .prepare("SELECT COUNT(*) AS n FROM posts WHERE viral_tier IS NOT NULL")
-      .get() as { n: number }
-  ).n;
-
-  const tierRows = db
-    .prepare(
-      "SELECT viral_tier AS tier, COUNT(*) AS n FROM posts WHERE viral_tier IS NOT NULL GROUP BY viral_tier"
-    )
-    .all() as Array<{ tier: ViralTier; n: number }>;
 
   const byTier: Record<ViralTier, number> = {
     good: 0,
@@ -461,29 +500,18 @@ export function getGlobalStats(): GlobalStats {
   };
   for (const r of tierRows) byTier[r.tier] = r.n;
 
-  const byLanguage = db
-    .prepare(
-      "SELECT COALESCE(language, '?') AS lang, COUNT(*) AS n FROM posts GROUP BY language ORDER BY n DESC"
-    )
-    .all() as Array<{ lang: string; n: number }>;
-
-  const decisionRows = db
-    .prepare(
-      "SELECT decision, COUNT(*) AS n FROM decisions GROUP BY decision"
-    )
-    .all() as Array<{ decision: Decision; n: number }>;
   const decisionsCount = { replicate: 0, maybe: 0, skip: 0 };
   for (const r of decisionRows) decisionsCount[r.decision] = r.n;
 
   return {
-    totalProfiles,
+    totalProfiles: profilesRow?.n ?? 0,
     totalPosts,
     totalReels,
     totalCarousels,
     totalImages,
-    taggedPosts,
+    taggedPosts: taggedRow?.n ?? 0,
     byTier,
-    byLanguage,
+    byLanguage: langRows,
     decisionsCount,
   };
 }

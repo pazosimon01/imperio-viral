@@ -1,5 +1,6 @@
 import {
   queryPosts,
+  POSTS_PAGE_SIZE,
   type HeatLevel,
   type PostType,
   type SortKey,
@@ -7,8 +8,9 @@ import {
 import type { ViralTier, Decision } from "@/lib/types";
 import { FilterBar } from "@/components/FilterBar";
 import { PostCard } from "@/components/PostCard";
+import { Pagination } from "@/components/Pagination";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 interface SearchParams {
   window?: string;
@@ -18,6 +20,7 @@ interface SearchParams {
   heat?: string;
   decision?: string;
   sort?: string;
+  page?: string;
 }
 
 export default async function AllPostsPage({
@@ -34,7 +37,8 @@ export default async function AllPostsPage({
     recentDays = Number.isFinite(n) && n > 0 ? n : 90;
   }
 
-  const posts = queryPosts({
+  const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const { posts, hasMore } = await queryPosts({
     recentDays,
     language: sp.lang as any,
     types: sp.type ? [sp.type as PostType] : undefined,
@@ -42,6 +46,7 @@ export default async function AllPostsPage({
     minHeat: (sp.heat as HeatLevel) ?? null,
     decision: sp.decision as Decision | "none" | undefined,
     sort: (sp.sort as SortKey) ?? "viralScore",
+    page,
   });
 
   return (
@@ -55,20 +60,26 @@ export default async function AllPostsPage({
 
       <FilterBar />
 
-      <div className="text-sm text-neutral-400">
-        Mostrando <strong className="text-white">{posts.length}</strong> posts
-      </div>
-
       {posts.length === 0 ? (
         <div className="rounded-lg border border-dashed border-neutral-800 p-12 text-center text-neutral-500">
-          Sin resultados. Prueba ampliar la ventana temporal o quitar filtros.
+          {page > 1
+            ? "No hay más resultados en esta página. Vuelve a la anterior."
+            : "Sin resultados. Prueba ampliar la ventana temporal o quitar filtros."}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {posts.map((p) => (
-            <PostCard key={p.id} post={p} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {posts.map((p) => (
+              <PostCard key={p.id} post={p} />
+            ))}
+          </div>
+          <Pagination
+            page={page}
+            hasMore={hasMore}
+            pageSize={POSTS_PAGE_SIZE}
+            itemsThisPage={posts.length}
+          />
+        </>
       )}
     </div>
   );

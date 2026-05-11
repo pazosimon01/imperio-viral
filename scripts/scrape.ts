@@ -1,18 +1,12 @@
-// Script de scrape. Lanza dos jobs en Apify por cada hashtag (posts + reels)
-// y normaliza/persiste los resultados en SQLite.
+// Script de scrape de hashtag. Llama a Apify, normaliza, persiste en Postgres.
 //
 // Uso:
 //   npm run scrape -- --hashtag=inteligenciaartificial --limit=10
 //   npm run scrape -- --hashtag=ia,chatgpt --limit=20 --type=reels
 //   npm run scrape -- --hashtag=ia --limit=10 --type=posts
-//
-// Por defecto: hashtag="inteligenciaartificial", limit=10, type=both.
-// Cuando type=both, lanza una llamada por cada tipo (limit aplica a cada uno),
-// así obtienes posts/carruseles + reels en el mismo run.
 
 import "dotenv/config";
 import { runHashtagScrape, type ResultsType } from "../lib/apify";
-import { initSchema } from "../lib/db";
 import { normalize, upsertPosts, recordScrapeRun } from "../lib/persist";
 
 interface CliArgs {
@@ -54,7 +48,6 @@ function parseArgs(argv: string[]): CliArgs {
 
 async function main() {
   const { hashtags, limit, types } = parseArgs(process.argv.slice(2));
-  initSchema();
 
   console.log(`\n=== Scrape ===`);
   console.log(`Hashtags: ${hashtags.join(", ")}`);
@@ -88,7 +81,7 @@ async function main() {
           normalize(it, scrapedAt, { sourceHashtag: hashtag })
         );
 
-        const { inserted, updated } = upsertPosts(items);
+        const { inserted, updated } = await upsertPosts(items);
         totalInserted += inserted;
         totalUpdated += updated;
 
@@ -99,7 +92,7 @@ async function main() {
         error = e instanceof Error ? e.message : String(e);
         console.error(`  #${hashtag} [${type}]: ERROR — ${error}`);
       } finally {
-        recordScrapeRun({
+        await recordScrapeRun({
           hashtag: `${hashtag}:${type}`,
           startedAt: tagStart,
           finishedAt: Math.floor(Date.now() / 1000),

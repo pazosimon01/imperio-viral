@@ -1,27 +1,10 @@
-// Baselines por perfil + clasificación de viralidad relativa.
-//
-// Ventanas temporales (configurables):
-//   baselineWindowDays  (default 180) — mediana se calcula sobre los posts
-//                                       publicados en este rango. Sample
-//                                       grande → mediana estable, no
-//                                       contaminada por contenido viejo.
-//   activeWindowDays    (default 365) — posts más viejos que esta ventana
-//                                       se consideran "histórico". Sus
-//                                       multiplier y tier se limpian a NULL,
-//                                       así no aparecen en rankings ni en
-//                                       la app.
-//
-// Tiers (escala del experto):
-//   2-5x   → 🟢 good       (buen performance)
-//   5-10x  → 🥉 viral      (viral del perfil)
-//   10-25x → 🥈 gem        (joya viral)
-//   25-50x → 🥇 diamond    (diamante)
-//   50x+   → 💎 unicorn    (unicornio)
+// Baselines por perfil + clasificación de viralidad relativa. Postgres + multi-tenant.
 
-import { getDb } from "./db";
+import { query, withTransaction, getWorkspaceId } from "./db";
+import { getActiveNicheId } from "./niches";
 import type { ViralTier } from "./types";
 
-const DAY = 86400; // segundos
+const DAY = 86400;
 export const DEFAULT_BASELINE_WINDOW_DAYS = 180;
 export const DEFAULT_ACTIVE_WINDOW_DAYS = 365;
 
@@ -43,9 +26,9 @@ export const TIER_LABEL: Record<ViralTier, string> = {
 };
 
 function median(values: number[]): number | null {
-  const xs = values.filter((v) => v != null && Number.isFinite(v)).sort(
-    (a, b) => a - b
-  );
+  const xs = values
+    .filter((v) => v != null && Number.isFinite(v))
+    .sort((a, b) => a - b);
   if (xs.length === 0) return null;
   const mid = Math.floor(xs.length / 2);
   return xs.length % 2 === 0 ? (xs[mid - 1] + xs[mid]) / 2 : xs[mid];
@@ -58,19 +41,20 @@ export interface BaselineOptions {
 
 export interface BaselineResult {
   username: string;
-  baselineSampleSize: number; // cuántos posts entraron al cálculo de mediana
-  activePostsCount: number;   // cuántos posts caen en la ventana activa
+  baselineSampleSize: number;
+  activePostsCount: number;
   medianEngagementScore: number | null;
   medianEngagementRate: number | null;
   medianViews: number | null;
   taggedPosts: number;
 }
 
-export function recomputeProfileBaseline(
+export async function recomputeProfileBaseline(
   username: string,
   options: BaselineOptions = {}
-): BaselineResult {
-  const db = getDb();
+): Promise<BaselineResult> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
   const u = username.toLowerCase();
 
   const baselineDays = options.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
@@ -80,19 +64,18 @@ export function recomputeProfileBaseline(
   const baselineCutoff = now - baselineDays * DAY;
   const activeCutoff = now - activeDays * DAY;
 
-  // 1. Calcular mediana sobre los posts del baseline (últimos N días).
-  const baselineRows = db
-    .prepare(
-      `SELECT engagement_score, engagement_rate,
-              COALESCE(video_view_count, video_play_count) AS plays
-       FROM posts
-       WHERE source_profile = ? AND posted_at > ?`
-    )
-    .all(u, baselineCutoff) as Array<{
+  // 1. Calcular mediana sobre los posts del baseline.
+  const baselineRows = await query<{
     engagement_score: number | null;
     engagement_rate: number | null;
     plays: number | null;
-  }>;
+  }>(
+    `SELECT engagement_score, engagement_rate,
+            COALESCE(video_view_count, video_play_count) AS plays
+     FROM posts
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_profile = $3 AND posted_at > $4`,
+    [wsId, nicheId, u, baselineCutoff]
+  );
 
   const medES = median(
     baselineRows.map((r) => r.engagement_score ?? 0).filter((v) => v > 0)
@@ -108,54 +91,48 @@ export function recomputeProfileBaseline(
       .filter((v): v is number => v != null && v > 0)
   );
 
-  db.prepare(
+  await query(
     `UPDATE profiles SET
-       median_engagement_score = ?,
-       median_engagement_rate  = ?,
-       median_views            = ?
-     WHERE username = ?`
-  ).run(medES, medER, medViews, u);
+       median_engagement_score = $1,
+       median_engagement_rate  = $2,
+       median_views            = $3
+     WHERE workspace_id = $4 AND niche_id = $5 AND username = $6`,
+    [medES, medER, medViews, wsId, nicheId, u]
+  );
 
-  // 2. Limpiar multiplier/tier de posts viejos (>activeCutoff).
-  db.prepare(
+  // 2. Limpiar multiplier/tier de posts viejos.
+  await query(
     `UPDATE posts
      SET viralidad_multiplier = NULL, viral_tier = NULL
-     WHERE source_profile = ? AND posted_at <= ?`
-  ).run(u, activeCutoff);
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_profile = $3 AND posted_at <= $4`,
+    [wsId, nicheId, u, activeCutoff]
+  );
 
-  // 3. Calcular multiplier y tier para los posts activos.
-  const activeRows = db
-    .prepare(
-      `SELECT id, engagement_score
-       FROM posts
-       WHERE source_profile = ? AND posted_at > ?`
-    )
-    .all(u, activeCutoff) as Array<{
-    id: string;
-    engagement_score: number | null;
-  }>;
-
-  const updateStmt = db.prepare(
-    `UPDATE posts SET viralidad_multiplier = ?, viral_tier = ? WHERE id = ?`
+  // 3. Calcular multiplier y tier para los posts activos (en una transacción
+  //    porque son updates row-by-row).
+  const activeRows = await query<{ id: string; engagement_score: number | null }>(
+    `SELECT id, engagement_score
+     FROM posts
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_profile = $3 AND posted_at > $4`,
+    [wsId, nicheId, u, activeCutoff]
   );
 
   let tagged = 0;
-  db.exec("BEGIN");
-  try {
+  await withTransaction(async (client) => {
     for (const r of activeRows) {
       let mult: number | null = null;
       if (medES && medES > 0 && r.engagement_score != null) {
         mult = r.engagement_score / medES;
       }
       const tier = classifyTier(mult);
-      updateStmt.run(mult, tier, r.id);
+      await client.query(
+        `UPDATE posts SET viralidad_multiplier = $1, viral_tier = $2
+         WHERE workspace_id = $3 AND niche_id = $4 AND id = $5`,
+        [mult, tier, wsId, nicheId, r.id]
+      );
       if (tier) tagged++;
     }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+  });
 
   return {
     username: u,

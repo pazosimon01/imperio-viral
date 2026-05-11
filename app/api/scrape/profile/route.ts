@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const jobId = createJob(
+    const jobId = await createJob(
       "profile",
       { usernames, limit },
       `Scrape de ${usernames.length} perfil(es), ${limit} posts c/u`
@@ -47,7 +47,7 @@ async function runJob(jobId: string, usernames: string[], limit: number) {
   try {
     for (let i = 0; i < usernames.length; i++) {
       const u = usernames[i];
-      updateJobMessage(
+      await updateJobMessage(
         jobId,
         `[${i + 1}/${usernames.length}] @${u}…`
       );
@@ -69,12 +69,12 @@ async function runJob(jobId: string, usernames: string[], limit: number) {
         });
       }
     }
-    finishJob(jobId, "done", {
+    await finishJob(jobId, "done", {
       result: summary,
       message: `Listo — ${summary.length} perfil(es)`,
     });
   } catch (e) {
-    finishJob(jobId, "failed", {
+    await finishJob(jobId, "failed", {
       error: e instanceof Error ? e.message : String(e),
       result: summary,
     });

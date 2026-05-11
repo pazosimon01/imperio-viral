@@ -10,7 +10,7 @@ export const runtime = "nodejs";
 export async function GET(req: NextRequest) {
   const minHeat =
     (req.nextUrl.searchParams.get("minHeat") as HeatLevel) ?? "caliente";
-  const candidates = getEnrichmentCandidates(minHeat);
+  const candidates = await getEnrichmentCandidates(minHeat);
   const cost = candidates.length * APIFY_PROFILE_COST_PER_ITEM;
 
   return NextResponse.json({

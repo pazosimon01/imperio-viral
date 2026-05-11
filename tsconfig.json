@@ -19,5 +19,16 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "scripts/analyze-er.ts",
+    "scripts/diagnose-apify-run.ts",
+    "scripts/diagnose-post.ts",
+    "scripts/diagnose-scrape.ts",
+    "scripts/dump-raw.ts",
+    "scripts/peek.ts",
+    "scripts/peek-profile.ts",
+    "scripts/test-img.ts",
+    "scripts/inspect-actor.ts"
+  ]
 }

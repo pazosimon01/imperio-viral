@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   getProfile,
   getProfilePosts,
+  POSTS_PAGE_SIZE,
   type HeatLevel,
   type PostType,
   type SortKey,
@@ -10,9 +11,10 @@ import {
 import type { ViralTier, Decision } from "@/lib/types";
 import { FilterBar } from "@/components/FilterBar";
 import { PostCard } from "@/components/PostCard";
+import { Pagination } from "@/components/Pagination";
 import { imgProxy } from "@/lib/img";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 interface Params {
   username: string;
@@ -25,6 +27,7 @@ interface SearchParams {
   heat?: string;
   decision?: string;
   sort?: string;
+  page?: string;
 }
 
 export default async function ProfilePage({
@@ -37,7 +40,7 @@ export default async function ProfilePage({
   const { username } = await params;
   const sp = await searchParams;
 
-  const profile = getProfile(username);
+  const profile = await getProfile(username);
   if (!profile) notFound();
 
   let recentDays: number | undefined;
@@ -48,7 +51,8 @@ export default async function ProfilePage({
     recentDays = Number.isFinite(n) && n > 0 ? n : 90;
   }
 
-  const posts = getProfilePosts(username, {
+  const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const { posts, hasMore } = await getProfilePosts(username, {
     recentDays,
     language: sp.lang as any,
     types: sp.type ? [sp.type as PostType] : undefined,
@@ -56,6 +60,7 @@ export default async function ProfilePage({
     minHeat: (sp.heat as HeatLevel) ?? null,
     decision: sp.decision as Decision | "none" | undefined,
     sort: (sp.sort as SortKey) ?? "viralScore",
+    page,
   });
 
   const tierCounts: Record<string, number> = {};
@@ -161,14 +166,24 @@ export default async function ProfilePage({
       {/* Grid de posts */}
       {posts.length === 0 ? (
         <div className="rounded-lg border border-dashed border-neutral-800 p-12 text-center text-neutral-500">
-          No hay posts con esos filtros. Prueba ampliando la ventana temporal.
+          {page > 1
+            ? "No hay más resultados en esta página."
+            : "No hay posts con esos filtros. Prueba ampliando la ventana temporal."}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {posts.map((p) => (
-            <PostCard key={p.id} post={p} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {posts.map((p) => (
+              <PostCard key={p.id} post={p} />
+            ))}
+          </div>
+          <Pagination
+            page={page}
+            hasMore={hasMore}
+            pageSize={POSTS_PAGE_SIZE}
+            itemsThisPage={posts.length}
+          />
+        </>
       )}
     </div>
   );

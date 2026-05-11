@@ -1,18 +1,7 @@
-// "Heat" relativo al hashtag para fotos y carruseles que NO tienen
-// engagement_rate (Instagram no expone views públicas para no-reels).
-//
-// Lógica: para cada (hashtag, type), calculamos la mediana de
-// engagement_score. Cada post recibe un multiplicador relativo y un tier:
-//
-//   <2×    → null (sin badge — performance bajo dentro del hashtag)
-//   2-5×   → 🔥 tibio
-//   5-10×  → 🔥🔥 caliente
-//   10×+   → 🔥🔥🔥 explosivo
-//
-// Solo aplica a posts que vinieron de hashtag scrape. Se almacena en
-// columnas hashtag_heat_mult y hashtag_heat_tier.
+// "Heat" relativo al hashtag para fotos y carruseles. Postgres + multi-tenant.
 
-import { getDb } from "./db";
+import { query, withTransaction, getWorkspaceId } from "./db";
+import { getActiveNicheId } from "./niches";
 import type { HeatLevel } from "./queries";
 
 const HEAT_TIER_THRESHOLDS: Array<{ min: number; tier: HeatLevel }> = [
@@ -22,9 +11,9 @@ const HEAT_TIER_THRESHOLDS: Array<{ min: number; tier: HeatLevel }> = [
 ];
 
 function median(values: number[]): number | null {
-  const xs = values.filter((v) => v != null && Number.isFinite(v)).sort(
-    (a, b) => a - b
-  );
+  const xs = values
+    .filter((v) => v != null && Number.isFinite(v))
+    .sort((a, b) => a - b);
   if (xs.length === 0) return null;
   const mid = Math.floor(xs.length / 2);
   return xs.length % 2 === 0 ? (xs[mid - 1] + xs[mid]) / 2 : xs[mid];
@@ -42,23 +31,22 @@ export interface HashtagHeatResult {
   byType: Record<string, { median: number | null; tagged: number }>;
 }
 
-export function recomputeHashtagHeat(hashtag: string): HashtagHeatResult {
-  const db = getDb();
+export async function recomputeHashtagHeat(
+  hashtag: string
+): Promise<HashtagHeatResult> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
   const tag = hashtag.toLowerCase();
-
   const byType: HashtagHeatResult["byType"] = {};
 
-  // Computamos por tipo (Image, Sidecar, Video) por separado, así un
-  // carrusel se compara solo contra otros carruseles del mismo hashtag.
   for (const type of ["Image", "Sidecar", "Video"]) {
-    const rows = db
-      .prepare(
-        `SELECT id, engagement_score
-         FROM posts
-         WHERE source_hashtag = ? AND type = ?
-           AND engagement_score IS NOT NULL`
-      )
-      .all(tag, type) as Array<{ id: string; engagement_score: number }>;
+    const rows = await query<{ id: string; engagement_score: number }>(
+      `SELECT id, engagement_score
+       FROM posts
+       WHERE workspace_id = $1 AND niche_id = $2 AND source_hashtag = $3 AND type = $4
+         AND engagement_score IS NOT NULL`,
+      [wsId, nicheId, tag, type]
+    );
 
     if (rows.length === 0) {
       byType[type] = { median: null, tagged: 0 };
@@ -69,34 +57,28 @@ export function recomputeHashtagHeat(hashtag: string): HashtagHeatResult {
     const med = median(scores);
 
     if (!med || med === 0) {
-      // Limpiar tier si no podemos calcular
-      db.prepare(
+      await query(
         `UPDATE posts SET hashtag_heat_mult = NULL, hashtag_heat_tier = NULL
-         WHERE source_hashtag = ? AND type = ?`
-      ).run(tag, type);
+         WHERE workspace_id = $1 AND niche_id = $2 AND source_hashtag = $3 AND type = $4`,
+        [wsId, nicheId, tag, type]
+      );
       byType[type] = { median: null, tagged: 0 };
       continue;
     }
 
-    const update = db.prepare(
-      `UPDATE posts SET hashtag_heat_mult = ?, hashtag_heat_tier = ?
-       WHERE id = ?`
-    );
-
     let tagged = 0;
-    db.exec("BEGIN");
-    try {
+    await withTransaction(async (client) => {
       for (const r of rows) {
         const mult = r.engagement_score / med;
         const tier = classify(mult);
-        update.run(mult, tier, r.id);
+        await client.query(
+          `UPDATE posts SET hashtag_heat_mult = $1, hashtag_heat_tier = $2
+           WHERE workspace_id = $3 AND niche_id = $4 AND id = $5`,
+          [mult, tier, wsId, nicheId, r.id]
+        );
         if (tier) tagged++;
       }
-      db.exec("COMMIT");
-    } catch (e) {
-      db.exec("ROLLBACK");
-      throw e;
-    }
+    });
 
     byType[type] = { median: med, tagged };
   }
@@ -104,13 +86,17 @@ export function recomputeHashtagHeat(hashtag: string): HashtagHeatResult {
   return { hashtag: tag, byType };
 }
 
-// Recalcula para todos los hashtags ya scrapeados.
-export function recomputeAllHashtagHeat(): HashtagHeatResult[] {
-  const db = getDb();
-  const tags = db
-    .prepare(
-      "SELECT DISTINCT source_hashtag FROM posts WHERE source_hashtag IS NOT NULL"
-    )
-    .all() as Array<{ source_hashtag: string }>;
-  return tags.map((t) => recomputeHashtagHeat(t.source_hashtag));
+export async function recomputeAllHashtagHeat(): Promise<HashtagHeatResult[]> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const tags = await query<{ source_hashtag: string }>(
+    `SELECT DISTINCT source_hashtag FROM posts
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_hashtag IS NOT NULL`,
+    [wsId, nicheId]
+  );
+  const results: HashtagHeatResult[] = [];
+  for (const t of tags) {
+    results.push(await recomputeHashtagHeat(t.source_hashtag));
+  }
+  return results;
 }

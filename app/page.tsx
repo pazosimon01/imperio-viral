@@ -4,11 +4,13 @@ import { imgProxy } from "@/lib/img";
 import { ScrapeProfileForm } from "@/components/ScrapeProfileForm";
 import { ScrapeHashtagForm } from "@/components/ScrapeHashtagForm";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
-export default function HomePage() {
-  const stats = getGlobalStats();
-  const profiles = getAllProfiles();
+export default async function HomePage() {
+  const [stats, profiles] = await Promise.all([
+    getGlobalStats(),
+    getAllProfiles(),
+  ]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -134,7 +136,7 @@ function TierStat({
 function ProfileCard({
   p,
 }: {
-  p: ReturnType<typeof getAllProfiles>[number];
+  p: Awaited<ReturnType<typeof getAllProfiles>>[number];
 }) {
   return (
     <Link

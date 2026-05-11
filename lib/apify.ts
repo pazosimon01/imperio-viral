@@ -131,6 +131,30 @@ export async function runProfileDetailsScrape(opts: {
   return { runId: run.id, items: items as any[] };
 }
 
+// Refresh de UN solo post — útil cuando la URL firmada del video caducó.
+// El actor de profile acepta directUrls con URLs de posts puntuales
+// (no solo de perfiles) y devuelve solo ese item.
+export async function runPostScrape(
+  postUrl: string
+): Promise<{ runId: string; items: ApifyHashtagItem[] }> {
+  const token = process.env.APIFY_TOKEN;
+  if (!token || token.startsWith("PEGA_AQUI")) {
+    throw new Error("APIFY_TOKEN no está configurado.");
+  }
+  const input = {
+    directUrls: [postUrl],
+    resultsType: "posts",
+    resultsLimit: 1,
+    addParentData: true,
+  };
+  console.log(`→ Apify ${PROFILE_ACTOR_ID}  refresh  ${postUrl}`);
+  const client = new ApifyClient({ token });
+  const run = await client.actor(PROFILE_ACTOR_ID).call(input);
+  console.log(`  runId=${run.id}  status=${run.status}`);
+  const { items } = await client.dataset(run.defaultDatasetId).listItems();
+  return { runId: run.id, items: items as unknown as ApifyHashtagItem[] };
+}
+
 export async function runProfileScrape(
   opts: RunProfileScrapeOptions
 ): Promise<ProfileScrapeResult> {

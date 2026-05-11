@@ -1,63 +1,45 @@
-// Crea/actualiza el schema de SQLite y rellena campos faltantes.
-// Uso: npm run init-db
+// Verifica conexión al workspace activo y lista counts por tabla.
+// El schema lo manejan los migrations de Supabase (supabase/migrations/).
 
 import "dotenv/config";
-import { getDb, initSchema } from "../lib/db";
-import { inferLanguage } from "../lib/language";
+import { query, queryOne, getWorkspaceId } from "../lib/db";
 
-function backfillLanguage(): number {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      "SELECT id, source_hashtag, caption FROM posts WHERE language IS NULL"
-    )
-    .all() as Array<{
-    id: string;
-    source_hashtag: string | null;
-    caption: string | null;
-  }>;
+async function main() {
+  const wsId = getWorkspaceId();
+  console.log(`Workspace activo: ${wsId}\n`);
 
-  if (rows.length === 0) return 0;
+  const tables = [
+    "posts",
+    "decisions",
+    "transcriptions",
+    "adaptations",
+    "profiles",
+    "scrape_runs",
+    "jobs",
+  ];
 
-  const update = db.prepare("UPDATE posts SET language = ? WHERE id = ?");
-  let n = 0;
-  db.exec("BEGIN");
-  try {
-    for (const r of rows) {
-      const lang = inferLanguage(r.source_hashtag, r.caption);
-      if (lang) {
-        update.run(lang, r.id);
-        n++;
-      }
-    }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
-  return n;
-}
-
-function main() {
-  initSchema();
-  const filled = backfillLanguage();
-  if (filled > 0) {
-    console.log(`Backfill: ${filled} post(s) actualizados con idioma.`);
-  }
-
-  const db = getDb();
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-    .all() as Array<{ name: string }>;
-
-  console.log("\nDB lista. Tablas:");
+  console.log("Conteos por tabla en este workspace:");
   for (const t of tables) {
-    if (t.name === "sqlite_sequence") continue;
-    const count = db
-      .prepare(`SELECT COUNT(*) AS n FROM "${t.name}"`)
-      .get() as { n: number };
-    console.log(`  - ${t.name}: ${count.n} filas`);
+    const row = await queryOne<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM ${t} WHERE workspace_id = $1`,
+      [wsId]
+    );
+    console.log(`  - ${t}: ${row?.n ?? 0} filas`);
   }
+
+  // Workspace tables (sin workspace_id filter)
+  const wsCount = await queryOne<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM workspaces"
+  );
+  const memberCount = await queryOne<{ n: number }>(
+    "SELECT COUNT(*)::int AS n FROM workspace_members"
+  );
+  console.log(`\nGlobal:`);
+  console.log(`  - workspaces: ${wsCount?.n ?? 0}`);
+  console.log(`  - workspace_members: ${memberCount?.n ?? 0}`);
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

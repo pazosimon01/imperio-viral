@@ -8,7 +8,7 @@ import {
   runProfileScrape,
   type ResultsType,
 } from "./apify";
-import { getDb } from "./db";
+import { queryOne, getWorkspaceId } from "./db";
 import { inferLanguage } from "./language";
 import {
   normalize,
@@ -18,7 +18,7 @@ import {
 } from "./persist";
 import { recomputeProfileBaseline, type BaselineResult } from "./baseline";
 import { recomputeHashtagHeat } from "./hashtag-heat";
-import type { ApifyHashtagItem, StoredProfile } from "./types";
+import type { StoredProfile } from "./types";
 
 const HARD_CUTOFF_DAYS = 365;
 
@@ -26,16 +26,17 @@ function toIsoDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
 
-export function decideProfileCutoff(
+export async function decideProfileCutoff(
   username: string,
   full: boolean
-): { cutoff: string | undefined; reason: string } {
+): Promise<{ cutoff: string | undefined; reason: string }> {
   if (full) return { cutoff: undefined, reason: "full" };
 
-  const db = getDb();
-  const existing = db
-    .prepare("SELECT scraped_at FROM profiles WHERE username = ?")
-    .get(username) as { scraped_at: number } | undefined;
+  const wsId = getWorkspaceId();
+  const existing = await queryOne<{ scraped_at: number }>(
+    "SELECT scraped_at FROM profiles WHERE workspace_id = $1 AND username = $2",
+    [wsId, username]
+  );
 
   if (existing?.scraped_at) {
     const overlap = existing.scraped_at - 86400;
@@ -45,8 +46,7 @@ export function decideProfileCutoff(
     };
   }
 
-  const oneYearAgo =
-    Math.floor(Date.now() / 1000) - HARD_CUTOFF_DAYS * 86400;
+  const oneYearAgo = Math.floor(Date.now() / 1000) - HARD_CUTOFF_DAYS * 86400;
   return { cutoff: toIsoDate(oneYearAgo), reason: "primer scrape (1 año)" };
 }
 
@@ -82,7 +82,7 @@ export async function scrapeProfile(
   const limit = options.limit ?? 200;
 
   const tagStart = Math.floor(Date.now() / 1000);
-  const { cutoff, reason } = decideProfileCutoff(username, !!options.full);
+  const { cutoff, reason } = await decideProfileCutoff(username, !!options.full);
 
   let runId: string | null = null;
   let receivedCount = 0;
@@ -106,7 +106,7 @@ export async function scrapeProfile(
       const normalized = result.items.map((it) =>
         normalize(it, scrapedAt, { sourceProfile: username })
       );
-      const up = upsertPosts(normalized);
+      const up = await upsertPosts(normalized);
       inserted = up.inserted;
       updated = up.updated;
       failed = up.failed;
@@ -115,7 +115,7 @@ export async function scrapeProfile(
       const profileData = extractProfileFromItem(sample);
       const profileLang = inferLanguage(null, sample.caption ?? null);
 
-      upsertProfile({
+      await upsertProfile({
         username,
         fullName: profileData.fullName ?? null,
         bio: profileData.bio ?? null,
@@ -131,17 +131,15 @@ export async function scrapeProfile(
         scrapedAt,
       });
 
-      baseline = recomputeProfileBaseline(username);
+      baseline = await recomputeProfileBaseline(username);
     } else {
-      // 0 items — incremental sin novedades, perfil privado, etc.
-      // No es error per se; baseline existente queda intacto.
-      baseline = recomputeProfileBaseline(username);
+      baseline = await recomputeProfileBaseline(username);
     }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     throw e;
   } finally {
-    recordScrapeRun({
+    await recordScrapeRun({
       hashtag: `profile:${username}`,
       startedAt: tagStart,
       finishedAt: Math.floor(Date.now() / 1000),
@@ -215,21 +213,18 @@ export async function scrapeHashtag(
       const normalized = result.items.map((it) =>
         normalize(it, scrapedAt, { sourceHashtag: hashtag })
       );
-      const up = upsertPosts(normalized);
+      const up = await upsertPosts(normalized);
       inserted = up.inserted;
       updated = up.updated;
       failed = up.failed;
 
-      // Recalcular heat relativo al hashtag (afecta a fotos y carruseles
-      // que no tienen engagement_rate%, y también recalcula la mediana
-      // para reels). Es barato (una query por type).
-      recomputeHashtagHeat(hashtag);
+      await recomputeHashtagHeat(hashtag);
     }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     throw e;
   } finally {
-    recordScrapeRun({
+    await recordScrapeRun({
       hashtag: `${hashtag}:${resultsType}`,
       startedAt: tagStart,
       finishedAt: Math.floor(Date.now() / 1000),

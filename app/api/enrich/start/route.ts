@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as { minHeat?: HeatLevel };
     const minHeat = body.minHeat ?? "caliente";
 
-    const candidates = getEnrichmentCandidates(minHeat);
+    const candidates = await getEnrichmentCandidates(minHeat);
     if (candidates.length === 0) {
       return NextResponse.json(
         { error: "No hay autores nuevos para enriquecer" },
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     }
 
     const usernames = candidates.map((c) => c.username);
-    const jobId = createJob(
+    const jobId = await createJob(
       "enrich",
       { usernames, minHeat },
       `Enriqueciendo followers de ${usernames.length} autor(es) — calor ${minHeat}+`
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 
 async function runJob(jobId: string, usernames: string[]) {
   try {
-    updateJobMessage(jobId, `Scrapeando details de ${usernames.length} perfil(es)…`);
+    await updateJobMessage(jobId, `Scrapeando details de ${usernames.length} perfil(es)…`);
     const r = await enrichProfiles(usernames);
     const total = usernames.length;
     const summary = [
@@ -50,12 +50,12 @@ async function runJob(jobId: string, usernames: string[]) {
     ]
       .filter(Boolean)
       .join(" · ");
-    finishJob(jobId, "done", {
+    await finishJob(jobId, "done", {
       result: r,
       message: summary,
     });
   } catch (e) {
-    finishJob(jobId, "failed", {
+    await finishJob(jobId, "failed", {
       error: e instanceof Error ? e.message : String(e),
     });
   }

@@ -1,19 +1,16 @@
-// Recalcula baselines de TODOS los perfiles con las ventanas configuradas:
-//   - Mediana sobre últimos 180 días
-//   - Posts >365 días pierden tier/multiplier
-// Útil al cambiar la fórmula o ventanas. No re-scrapea nada (cero coste).
+// Recalcula baselines de TODOS los perfiles del workspace activo.
 
 import "dotenv/config";
-import { getDb, initSchema } from "../lib/db";
+import { query, getWorkspaceId } from "../lib/db";
 import { recomputeProfileBaseline } from "../lib/baseline";
 
-function main() {
-  initSchema();
-  const db = getDb();
+async function main() {
+  const wsId = getWorkspaceId();
 
-  const profiles = db
-    .prepare("SELECT username FROM profiles ORDER BY username")
-    .all() as Array<{ username: string }>;
+  const profiles = await query<{ username: string }>(
+    "SELECT username FROM profiles WHERE workspace_id = $1 ORDER BY username",
+    [wsId]
+  );
 
   if (profiles.length === 0) {
     console.log("No hay perfiles. Corre npm run scrape:profile primero.");
@@ -23,7 +20,7 @@ function main() {
   console.log(`Recomputando baselines para ${profiles.length} perfil(es)…\n`);
 
   for (const { username } of profiles) {
-    const r = recomputeProfileBaseline(username);
+    const r = await recomputeProfileBaseline(username);
     console.log(
       `@${username}` +
         `  | sample baseline: ${r.baselineSampleSize}` +
@@ -35,4 +32,7 @@ function main() {
   console.log();
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

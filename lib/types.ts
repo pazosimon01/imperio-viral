@@ -74,7 +74,7 @@ export interface StoredPost {
   scrapedAt: number; // unix seconds
   sourceHashtag: string | null;
   sourceProfile: string | null; // username si vino de scrape de perfil
-  language: "es" | "en" | "pt" | null;
+  language: "es" | "en" | "pt" | "other" | null;
 
   // Scores calculados (ver lib/score.ts para fórmulas)
   engagementScore: number; // absoluto: likes + comments×4 + shares×6
@@ -107,7 +107,7 @@ export interface StoredProfile {
   postsCount: number | null;
   profilePicUrl: string | null;
   isVerified: boolean | null;
-  language: "es" | "en" | "pt" | null;
+  language: "es" | "en" | "pt" | "other" | null;
   // Baselines recalculados tras cada scrape de perfil
   medianEngagementScore: number | null;
   medianEngagementRate: number | null;
@@ -129,6 +129,25 @@ export interface StoredTranscription {
   transcription: string;
   language: string | null;
   transcribedAt: number;
+}
+
+// Estructura del JSON generado por el LLM al adaptar una transcripción.
+// Guardado en `adaptations.result_json` como blob serializado.
+export interface AdaptationResult {
+  adaptedScript: string; // Guión completo en español, listo para grabar
+  hook: { type: string; quote: string }; // Hook (primeros ~3 segundos)
+  development: string[]; // Puntos clave del desarrollo
+  cta: { type: string; quote: string }; // Cierre / llamado a la acción
+  template: string; // Plantilla con [PLACEHOLDERS] para reusar el ángulo
+  alternativeHooks: string[]; // 5 hooks alternos sobre el mismo tema
+}
+
+export interface StoredAdaptation {
+  postId: string;
+  sourceLang: string | null;
+  result: AdaptationResult;
+  model: string;
+  adaptedAt: number;
 }
 
 export interface ScrapeRun {

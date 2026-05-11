@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    setDecision(body.postId, body.decision ?? null, body.notes);
+    await setDecision(body.postId, body.decision ?? null, body.notes);
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error(e);
