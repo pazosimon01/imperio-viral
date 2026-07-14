@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Job } from "@/lib/jobs";
 
 const POLL_INTERVAL_MS = 2500;
@@ -8,12 +8,17 @@ const POLL_INTERVAL_MS = 2500;
 export function JobStatus({
   jobId,
   onDone,
+  onComplete,
 }: {
   jobId: string;
   onDone?: () => void;
+  // Se dispara UNA vez, automáticamente, cuando el job termina con éxito.
+  // Útil para redirigir a los resultados sin que el usuario tenga que clickear.
+  onComplete?: (job: Job) => void;
 }) {
   const [job, setJob] = useState<Job | null>(null);
   const [tick, setTick] = useState(0);
+  const completedRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -28,6 +33,9 @@ export function JobStatus({
         setJob(data);
         if (data.status === "running") {
           timer = setTimeout(poll, POLL_INTERVAL_MS);
+        } else if (data.status === "done" && !completedRef.current) {
+          completedRef.current = true;
+          onComplete?.(data);
         }
       } catch {
         if (!alive) return;

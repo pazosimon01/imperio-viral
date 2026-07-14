@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const usernames = Array.from(
       new Set(usersRaw.map((u) => extractUsername(u)).filter(Boolean))
     );
-    const limit = Math.max(1, Math.min(2000, body.limit ?? 200));
+    const limit = Math.max(1, Math.min(2000, body.limit ?? 50));
 
     if (usernames.length === 0) {
       return NextResponse.json(

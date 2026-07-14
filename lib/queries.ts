@@ -32,11 +32,21 @@ export interface ProfileSummary {
 export async function getAllProfiles(): Promise<ProfileSummary[]> {
   const wsId = getWorkspaceId();
   const nicheId = await getActiveNicheId();
+  // Antes: 2 subconsultas correlacionadas por fila (N×2 escaneos de posts).
+  // Ahora: un solo GROUP BY sobre posts unido a profiles → 1 escaneo.
   const rows = await query<any>(
     `SELECT p.*,
-            (SELECT COUNT(*) FROM posts WHERE workspace_id = p.workspace_id AND niche_id = p.niche_id AND source_profile = p.username) AS total_posts,
-            (SELECT COUNT(*) FROM posts WHERE workspace_id = p.workspace_id AND niche_id = p.niche_id AND source_profile = p.username AND viral_tier IS NOT NULL) AS tagged_posts
+            COALESCE(c.total_posts, 0)  AS total_posts,
+            COALESCE(c.tagged_posts, 0) AS tagged_posts
      FROM profiles p
+     LEFT JOIN (
+       SELECT source_profile,
+              COUNT(*)                                   AS total_posts,
+              COUNT(*) FILTER (WHERE viral_tier IS NOT NULL) AS tagged_posts
+       FROM posts
+       WHERE workspace_id = $1 AND niche_id = $2 AND source_profile IS NOT NULL
+       GROUP BY source_profile
+     ) c ON c.source_profile = p.username
      WHERE p.workspace_id = $1 AND p.niche_id = $2
      ORDER BY p.followers_count DESC NULLS LAST`,
     [wsId, nicheId]
@@ -112,6 +122,7 @@ export interface PostFilters {
   sort?: SortKey;
   sourceHashtag?: string | "any" | null;
   page?: number; // 1-indexed
+  pageSize?: number; // override del tamaño de página (default POSTS_PAGE_SIZE)
 }
 
 export const POSTS_PAGE_SIZE = 60;
@@ -244,11 +255,12 @@ export async function queryPosts(
       "COALESCE(p.video_view_count, p.video_play_count) DESC NULLS LAST",
   };
 
-  // Paginación: pedimos PAGE_SIZE + 1 para detectar si hay más sin necesidad
-  // de un COUNT(*) extra. Slice al final si trajo PAGE_SIZE + 1.
+  // Paginación: pedimos pageSize + 1 para detectar si hay más sin necesidad
+  // de un COUNT(*) extra. Slice al final si trajo pageSize + 1.
+  const pageSize = Math.max(1, Math.min(500, filters.pageSize ?? POSTS_PAGE_SIZE));
   const page = Math.max(1, filters.page ?? 1);
-  const offset = (page - 1) * POSTS_PAGE_SIZE;
-  const limitParam = addParam(POSTS_PAGE_SIZE + 1);
+  const offset = (page - 1) * pageSize;
+  const limitParam = addParam(pageSize + 1);
   const offsetParam = addParam(offset);
 
   // Importante: NO traer p.raw_json acá — son ~10KB por row × 500 = 5MB
@@ -282,8 +294,8 @@ export async function queryPosts(
   `;
 
   const rows = await query<any>(sql, params);
-  const hasMore = rows.length > POSTS_PAGE_SIZE;
-  const sliced = hasMore ? rows.slice(0, POSTS_PAGE_SIZE) : rows;
+  const hasMore = rows.length > pageSize;
+  const sliced = hasMore ? rows.slice(0, pageSize) : rows;
   return {
     posts: sliced.map(rowToPost),
     page,

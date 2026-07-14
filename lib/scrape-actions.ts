@@ -8,7 +8,8 @@ import {
   runProfileScrape,
   type ResultsType,
 } from "./apify";
-import { queryOne, getWorkspaceId } from "./db";
+import { query, queryOne, getWorkspaceId } from "./db";
+import { getActiveNicheId } from "./niches";
 import { inferLanguage } from "./language";
 import {
   normalize,
@@ -16,7 +17,10 @@ import {
   upsertPosts,
   upsertProfile,
 } from "./persist";
-import { recomputeProfileBaseline, type BaselineResult } from "./baseline";
+import {
+  recomputeProfileMedianFast,
+  type BaselineResult,
+} from "./baseline";
 import { recomputeHashtagHeat } from "./hashtag-heat";
 import type { StoredProfile } from "./types";
 
@@ -62,6 +66,27 @@ function extractProfileFromItem(item: any): Partial<StoredProfile> {
   };
 }
 
+// Recalcula engagement_rate = (likes + comments) / followers × 100 para todos
+// los posts del perfil. Misma fórmula que computeScores (likes/comments
+// negativos = ocultos por IG → cuentan como 0). Si no hay followers, no toca
+// nada. Una sola sentencia SQL (rápido, sin loop por fila).
+async function backfillProfileEngagementRate(
+  username: string,
+  followers: number | null
+): Promise<void> {
+  if (!followers || followers <= 0) return;
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  await query(
+    `UPDATE posts SET engagement_rate = ROUND(
+       ((GREATEST(likes_count, 0) + GREATEST(comments_count, 0))::numeric / $4) * 100,
+       2
+     )
+     WHERE workspace_id = $1 AND niche_id = $2 AND source_profile = $3`,
+    [wsId, nicheId, username, followers]
+  );
+}
+
 export interface ProfileScrapeResult {
   username: string;
   itemsReceived: number;
@@ -103,16 +128,25 @@ export async function scrapeProfile(
 
     if (receivedCount > 0) {
       const scrapedAt = Math.floor(Date.now() / 1000);
+
+      // Followers del perfil — necesarios para el ER por post. Se toman del
+      // primer item (addParentData) y se usan como fallback si algún item
+      // puntual no trae el dato.
+      const sample = result.items[0] as any;
+      const profileData = extractProfileFromItem(sample);
+      const profileFollowers = profileData.followersCount ?? null;
+
       const normalized = result.items.map((it) =>
-        normalize(it, scrapedAt, { sourceProfile: username })
+        normalize(it, scrapedAt, {
+          sourceProfile: username,
+          followersCount: (it as any).followersCount ?? profileFollowers,
+        })
       );
       const up = await upsertPosts(normalized);
       inserted = up.inserted;
       updated = up.updated;
       failed = up.failed;
 
-      const sample = result.items[0] as any;
-      const profileData = extractProfileFromItem(sample);
       const profileLang = inferLanguage(null, sample.caption ?? null);
 
       await upsertProfile({
@@ -131,9 +165,15 @@ export async function scrapeProfile(
         scrapedAt,
       });
 
-      baseline = await recomputeProfileBaseline(username);
+      // Backfill del ER de TODOS los posts del perfil (no solo los recién
+      // traídos): en scrapes incrementales los posts viejos quedaron con
+      // engagement_rate null. Lo recalculamos con los followers actuales para
+      // que ABSOLUTAMENTE todos tengan engagement basado en sus seguidores.
+      await backfillProfileEngagementRate(username, profileFollowers);
+
+      baseline = await recomputeProfileMedianFast(username);
     } else {
-      baseline = await recomputeProfileBaseline(username);
+      baseline = await recomputeProfileMedianFast(username);
     }
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);

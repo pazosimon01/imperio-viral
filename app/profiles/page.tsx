@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getAllProfiles } from "@/lib/queries";
 import { imgProxy } from "@/lib/img";
+import { ProfileSearch } from "@/components/ProfileSearch";
 
 export const revalidate = 30;
 
@@ -16,6 +17,8 @@ export default async function ProfilesIndexPage() {
         </p>
       </header>
 
+      <ProfileSearch />
+
       {profiles.length === 0 ? (
         <p className="rounded-lg border border-neutral-800 bg-neutral-950 p-6 text-neutral-400">
           Aún no has trackeado ningún perfil. Corre{" "}
@@ -29,11 +32,8 @@ export default async function ProfilesIndexPage() {
             <thead className="border-b border-neutral-800 text-xs uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-4 py-3 text-left">Perfil</th>
-                <th className="px-4 py-3 text-right">Followers</th>
-                <th className="px-4 py-3 text-right">Mediana ER</th>
-                <th className="px-4 py-3 text-right">Posts en DB</th>
-                <th className="px-4 py-3 text-right">Outliers</th>
-                <th className="px-4 py-3 text-right">Idioma</th>
+                <th className="px-4 py-3 text-right">Seguidores</th>
+                <th className="px-4 py-3 text-right">Engagement típico</th>
               </tr>
             </thead>
             <tbody>
@@ -44,7 +44,7 @@ export default async function ProfilesIndexPage() {
                 >
                   <td className="px-4 py-3">
                     <Link
-                      href={`/profiles/${p.username}`}
+                      href={`/a/${p.username}`}
                       className="flex items-center gap-3"
                     >
                       {p.profilePicUrl ? (
@@ -77,22 +77,7 @@ export default async function ProfilesIndexPage() {
                     {fmt(p.followersCount)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-emerald-400">
-                    {p.medianEngagementRate?.toFixed(2) ?? "—"}%
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono text-neutral-400">
-                    {p.totalPostsInDb}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono">
-                    {p.taggedPostsCount > 0 ? (
-                      <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-emerald-300">
-                        {p.taggedPostsCount}
-                      </span>
-                    ) : (
-                      <span className="text-neutral-600">0</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right text-xs uppercase text-neutral-400">
-                    {p.language ?? "—"}
+                    {p.medianEngagementRate?.toFixed(1) ?? "—"}%
                   </td>
                 </tr>
               ))}

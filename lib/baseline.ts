@@ -1,6 +1,6 @@
 // Baselines por perfil + clasificación de viralidad relativa. Postgres + multi-tenant.
 
-import { query, withTransaction, getWorkspaceId } from "./db";
+import { query, queryOne, withTransaction, getWorkspaceId } from "./db";
 import { getActiveNicheId } from "./niches";
 import type { ViralTier } from "./types";
 
@@ -47,6 +47,63 @@ export interface BaselineResult {
   medianEngagementRate: number | null;
   medianViews: number | null;
   taggedPosts: number;
+}
+
+// Versión RÁPIDA: calcula las medianas del perfil en UNA sola sentencia SQL
+// (percentile_cont), sin el loop fila-por-fila de tiers que tenía
+// recomputeProfileBaseline. Es lo que usa el flujo "Analizar perfil" para no
+// pagar la latencia (ni el riesgo de "Connection closed") de actualizar tier
+// por tier. Devuelve un BaselineResult compatible (taggedPosts = 0: los tiers
+// no se usan en la vista simplificada).
+export async function recomputeProfileMedianFast(
+  username: string,
+  options: BaselineOptions = {}
+): Promise<BaselineResult> {
+  const wsId = getWorkspaceId();
+  const nicheId = await getActiveNicheId();
+  const u = username.toLowerCase();
+  const baselineDays = options.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
+  const cutoff = Math.floor(Date.now() / 1000) - baselineDays * DAY;
+
+  const row = await queryOne<{
+    med_er: number | null;
+    med_es: number | null;
+    med_views: number | null;
+    n: number;
+  }>(
+    `WITH agg AS (
+       SELECT
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY engagement_rate)
+           FILTER (WHERE engagement_rate > 0) AS med_er,
+         percentile_cont(0.5) WITHIN GROUP (ORDER BY engagement_score)
+           FILTER (WHERE engagement_score > 0) AS med_es,
+         percentile_cont(0.5) WITHIN GROUP
+           (ORDER BY COALESCE(video_view_count, video_play_count))
+           FILTER (WHERE COALESCE(video_view_count, video_play_count) > 0) AS med_views,
+         COUNT(*)::int AS n
+       FROM posts
+       WHERE workspace_id = $1 AND niche_id = $2
+         AND source_profile = $3 AND posted_at > $4
+     )
+     UPDATE profiles p SET
+       median_engagement_rate  = agg.med_er,
+       median_engagement_score = agg.med_es,
+       median_views            = agg.med_views
+     FROM agg
+     WHERE p.workspace_id = $1 AND p.niche_id = $2 AND p.username = $3
+     RETURNING agg.med_er, agg.med_es, agg.med_views, agg.n`,
+    [wsId, nicheId, u, cutoff]
+  );
+
+  return {
+    username: u,
+    baselineSampleSize: row?.n ?? 0,
+    activePostsCount: row?.n ?? 0,
+    medianEngagementScore: row?.med_es ?? null,
+    medianEngagementRate: row?.med_er ?? null,
+    medianViews: row?.med_views ?? null,
+    taggedPosts: 0,
+  };
 }
 
 export async function recomputeProfileBaseline(

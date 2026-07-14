@@ -11,6 +11,10 @@ import { downloadAndStoreImage } from "./supabase-storage";
 export interface NormalizeOptions {
   sourceHashtag?: string | null;
   sourceProfile?: string | null;
+  // Followers del autor — IMPRESCINDIBLE para que el engagement_rate se calcule
+  // por post. El profile-scraper trae followersCount en cada item gracias a
+  // addParentData; lo pasamos acá para que NINGÚN post quede con ER null.
+  followersCount?: number | null;
 }
 
 export function normalize(
@@ -20,7 +24,14 @@ export function normalize(
 ): StoredPost {
   const sourceHashtag = opts.sourceHashtag ?? null;
   const sourceProfile = opts.sourceProfile ?? null;
-  const scores = computeScores(item);
+  // Resolvemos followers desde la opción explícita o desde el propio item
+  // (addParentData lo inyecta como followersCount / owner.followersCount).
+  const followersCount =
+    opts.followersCount ??
+    (item as any).followersCount ??
+    (item as any).owner?.followersCount ??
+    null;
+  const scores = computeScores(item, { followersCount });
   const postedAt = item.timestamp
     ? Math.floor(new Date(item.timestamp).getTime() / 1000)
     : scrapedAt;
@@ -143,7 +154,7 @@ async function downloadThumbnails(
   posts: StoredPost[]
 ): Promise<Map<string, string | null>> {
   const result = new Map<string, string | null>();
-  const concurrency = 5;
+  const concurrency = 10;
   let cursor = 0;
 
   async function worker() {
