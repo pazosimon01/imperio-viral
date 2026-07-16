@@ -26,7 +26,6 @@ export async function GET(req: NextRequest) {
   try {
     const upstream = await fetch(target, {
       headers: {
-        // Algunos endpoints de IG quieren un user-agent realista
         "user-agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
       },
@@ -34,8 +33,7 @@ export async function GET(req: NextRequest) {
     if (!upstream.ok) {
       return new Response(null, { status: upstream.status });
     }
-    const body = await upstream.arrayBuffer();
-    return new Response(body, {
+    return new Response(upstream.body, {
       headers: {
         "content-type": upstream.headers.get("content-type") ?? "image/jpeg",
         "cache-control":

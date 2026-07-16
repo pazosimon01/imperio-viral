@@ -3,9 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-// Investigar VARIOS perfiles a la vez con el scraper rápido (directo a IG, sin
-// Apify). Junta todos los posts y los ordena por engagement vs. seguidores.
-
 const COUNT_OPTIONS = [12, 24, 48];
 const DEFAULT_COUNT = 48;
 
@@ -38,7 +35,12 @@ export function MultiProfileForm() {
   function go() {
     if (users.length === 0) return;
     setGoing(true);
-    router.push(`/m?users=${encodeURIComponent(users.join(","))}&n=${count}`);
+    if (users.length > 40) {
+      sessionStorage.setItem("multi_users", users.join(","));
+      router.push(`/m?from=session&n=${count}`);
+    } else {
+      router.push(`/m?users=${encodeURIComponent(users.join(","))}&n=${count}`);
+    }
   }
 
   return (
@@ -46,8 +48,8 @@ export function MultiProfileForm() {
       <header className="mb-3">
         <h2 className="text-base font-semibold">🔍 Investigar perfiles</h2>
         <p className="text-xs text-neutral-500">
-          Pega hasta 50 perfiles (coma o salto de línea). Los analiza a todos en
-          segundos y junta sus publicaciones ordenadas por{" "}
+          Pega hasta 3000 perfiles (coma o salto de línea). Los analiza a todos y
+          junta sus publicaciones ordenadas por{" "}
           <span className="text-emerald-400">engagement vs. seguidores</span>.
         </p>
       </header>

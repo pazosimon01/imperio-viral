@@ -1,9 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { FastProfile, FastPost } from "@/lib/ig-fast";
-import { imgProxy, videoPreviewProxy } from "@/lib/img";
-import { attachVideo, detachVideo } from "@/lib/video-singleton";
 
 const TYPE_ICON: Record<FastPost["mediaType"], string> = {
   image: "📷",
@@ -43,6 +41,8 @@ function fmtDate(takenAt: number): string {
   return `${d.getDate()} ${MESES[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+const PAGE_SIZE = 30;
+
 function erColor(rate: number | null): string {
   if (rate == null) return "text-neutral-400";
   if (rate >= 6) return "text-emerald-400";
@@ -60,6 +60,7 @@ export function FastProfileView({
 }) {
   const [format, setFormat] = useState("all");
   const [sort, setSort] = useState("er");
+  const [limit, setLimit] = useState(PAGE_SIZE);
 
   const visible = useMemo(() => {
     let list = posts;
@@ -75,6 +76,9 @@ export function FastProfileView({
     return sorted;
   }, [posts, format, sort]);
 
+  const rendered = useMemo(() => visible.slice(0, limit), [visible, limit]);
+  const hasMore = visible.length > limit;
+
   return (
     <div className="flex flex-col gap-5">
       {/* Header */}
@@ -82,7 +86,8 @@ export function FastProfileView({
         {profile.profilePicUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={imgProxy(profile.profilePicUrl)}
+            src={profile.profilePicUrl}
+            referrerPolicy="no-referrer"
             alt=""
             className="h-16 w-16 flex-shrink-0 rounded-full bg-neutral-800 object-cover"
           />
@@ -122,7 +127,7 @@ export function FastProfileView({
             <button
               key={f.value}
               type="button"
-              onClick={() => setFormat(f.value)}
+              onClick={() => { setFormat(f.value); setLimit(PAGE_SIZE); }}
               className={
                 "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors " +
                 (format === f.value
@@ -138,7 +143,7 @@ export function FastProfileView({
           <span>Ordenar:</span>
           <select
             value={sort}
-            onChange={(e) => setSort(e.target.value)}
+            onChange={(e) => { setSort(e.target.value); setLimit(PAGE_SIZE); }}
             className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 hover:border-neutral-500 focus:border-blue-500 focus:outline-none"
           >
             {SORTS.map((o) => (
@@ -159,11 +164,22 @@ export function FastProfileView({
           No hay publicaciones con ese formato.
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {visible.map((p) => (
-            <Card key={p.id} post={p} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {rendered.map((p) => (
+              <Card key={p.id} post={p} />
+            ))}
+          </div>
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => setLimit((l) => l + PAGE_SIZE)}
+              className="mx-auto rounded-lg border border-neutral-700 bg-neutral-900 px-6 py-2.5 text-sm font-medium text-neutral-200 transition-colors hover:border-neutral-500 hover:bg-neutral-800"
+            >
+              Mostrar {Math.min(PAGE_SIZE, visible.length - limit)} mas ({limit}/{visible.length})
+            </button>
+          )}
+        </>
       )}
     </div>
   );
@@ -182,57 +198,33 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function Card({ post }: { post: FastPost }) {
   const [failed, setFailed] = useState(false);
-  const [videoReady, setVideoReady] = useState(false);
-  const [withSound, setWithSound] = useState(false);
-  const [showPlay, setShowPlay] = useState(true);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isVideo = post.mediaType === "video" && !!post.videoUrl;
+  const isVideo = post.mediaType === "video";
 
-  const onEnter = useCallback(() => {
-    if (!isVideo) return;
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    hoverTimer.current = setTimeout(() => {
-      const c = containerRef.current;
-      const src = videoPreviewProxy(post.videoUrl);
-      if (!c || !src) return;
-      setShowPlay(false);
-      attachVideo(c, src, {
-        onReady: () => setVideoReady(true),
-        onSound: (s) => setWithSound(s),
-      });
-    }, 200);
-  }, [isVideo, post.videoUrl]);
-
-  const onLeave = useCallback(() => {
-    if (hoverTimer.current) {
-      clearTimeout(hoverTimer.current);
-      hoverTimer.current = null;
-    }
-    detachVideo();
-    setVideoReady(false);
-    setWithSound(false);
-    setShowPlay(true);
-  }, []);
+  const onImgError = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
+    const img = e.currentTarget;
+    if (img.dataset.proxied) { setFailed(true); return; }
+    img.dataset.proxied = "1";
+    img.src = `/api/img?url=${encodeURIComponent(post.thumbnailUrl!)}`;
+  }, [post.thumbnailUrl]);
 
   return (
     <a
       href={post.url}
       target="_blank"
       rel="noreferrer"
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
       className="group flex flex-col overflow-hidden rounded-xl border border-neutral-800 bg-neutral-950 transition-colors hover:border-neutral-600"
     >
-      <div ref={containerRef} className="relative aspect-[4/5] overflow-hidden bg-neutral-900">
+      <div className="relative aspect-[4/5] overflow-hidden bg-neutral-900">
         {post.thumbnailUrl && !failed ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={imgProxy(post.thumbnailUrl)}
+            src={post.thumbnailUrl}
+            referrerPolicy="no-referrer"
             alt=""
             loading="lazy"
-            onError={() => setFailed(true)}
-            className="h-full w-full object-cover"
+            decoding="async"
+            onError={onImgError}
+            className="h-full w-full object-cover transition-opacity duration-200"
           />
         ) : (
           <div className="flex h-full items-center justify-center bg-gradient-to-br from-neutral-900 to-neutral-950 text-5xl opacity-40">
@@ -240,15 +232,9 @@ function Card({ post }: { post: FastPost }) {
           </div>
         )}
 
-        {isVideo && videoReady && (
-          <div className="pointer-events-none absolute bottom-2 right-2 z-10 rounded bg-black/70 px-1.5 py-0.5 text-[11px] backdrop-blur-sm">
-            {withSound ? "🔊" : "🔇"}
-          </div>
-        )}
-
-        {isVideo && showPlay && (
+        {isVideo && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="rounded-full bg-black/55 px-3 py-2 text-lg backdrop-blur-sm">
+            <span className="rounded-full bg-black/55 px-3 py-2 text-lg backdrop-blur-sm group-hover:scale-110 transition-transform">
               ▶
             </span>
           </div>

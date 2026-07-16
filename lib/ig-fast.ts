@@ -40,7 +40,9 @@ function curlRequest(
     const args = [
       "-s",
       "--max-time",
-      "30",
+      "45",
+      "--connect-timeout",
+      "15",
       "--proxy",
       IG_PROXY_URL,
       "-w",
@@ -78,23 +80,48 @@ function curlRequest(
 let proxyConsecutiveFails = 0;
 let proxyDisabledUntil = 0;
 
+let lastRequestTime = 0;
+const MIN_REQUEST_GAP_MS = PROXY_ENABLED ? 120 : 350;
+
 async function rawRequest(
   method: string,
   url: string,
   headers: Record<string, string>,
   body?: string
 ): Promise<RawResponse> {
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (elapsed < MIN_REQUEST_GAP_MS) {
+    await sleep(MIN_REQUEST_GAP_MS - elapsed);
+  }
+  lastRequestTime = Date.now();
+
   if (IG_PROXY_URL && Date.now() > proxyDisabledUntil) {
-    const r = await curlRequest(method, url, headers, body);
-    if (r.status !== 0) {
-      proxyConsecutiveFails = 0;
-      return r;
+    try {
+      const r = await curlRequest(method, url, headers, body);
+      if (r.status !== 0) {
+        proxyConsecutiveFails = 0;
+        return r;
+      }
+    } catch {
+      // curl spawn error — count as failure
     }
     proxyConsecutiveFails++;
-    if (proxyConsecutiveFails >= 5) {
-      proxyDisabledUntil = Date.now() + 300_000;
-      console.warn("[ig-fast] proxy caído (5 fallos seguidos), desactivado 5 min");
+    if (proxyConsecutiveFails >= 15) {
+      proxyDisabledUntil = Date.now() + 120_000;
+      console.warn("[ig-fast] proxy caído (15 fallos seguidos), desactivado 2 min");
       proxyConsecutiveFails = 0;
+    } else {
+      await sleep(500);
+      try {
+        const r2 = await curlRequest(method, url, headers, body);
+        if (r2.status !== 0) {
+          proxyConsecutiveFails = 0;
+          return r2;
+        }
+      } catch {
+        // retry also failed
+      }
     }
   }
   const res = await fetch(url, { method, headers, body });
@@ -211,8 +238,9 @@ async function igFetch(url: string, ua: string, attempt = 0): Promise<any> {
   // 429 y 401 ("Please wait a few minutes", require_login) = límite de IG por IP.
   // Con proxy, cada reintento sale por una IP nueva → suele resolverse.
   if (status === 429 || status === 401) {
-    if (attempt < 3) {
-      await sleep((IG_PROXY_URL ? 400 : 2500) * (attempt + 1));
+    const maxAttempts = IG_PROXY_URL ? 4 : 3;
+    if (attempt < maxAttempts) {
+      await sleep((IG_PROXY_URL ? 600 : 2500) * (attempt + 1));
       return igFetch(url, ua, attempt + 1);
     }
     throw new IgFastError(RATE_LIMIT_MSG, "rate_limited");
