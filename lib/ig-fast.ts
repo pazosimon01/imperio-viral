@@ -58,26 +58,34 @@ function curlRequest(
     let err = "";
     c.stdout.on("data", (d) => (out += d));
     c.stderr.on("data", (d) => (err += d));
-    c.on("error", reject);
-    c.on("close", () => {
+    c.on("error", (e) => {
+      lastProxyDetail = `spawn error: ${e.message}`;
+      reject(e);
+    });
+    c.on("close", (closeCode) => {
       const idx = out.lastIndexOf("\n__IGSTATUS__");
       if (idx === -1) {
-        // Sin marcador → falló antes de responder. Si el proxy rechazó la
-        // autenticación (407 en el CONNECT), curl lo dice en stderr.
+        // Sin marcador → falló antes de responder. curl exit: 7=no conecta al
+        // proxy (puerto bloqueado/host malo), 28=timeout, 5=DNS del proxy.
+        lastProxyDetail = `curl exit ${closeCode}${err ? " · " + err.slice(0, 100) : ""}`;
         if (/407|proxy auth|CONNECT tunnel failed/i.test(err)) markProxyAuthFail();
-        reject(new Error("curl sin status: " + (err || "vacío")));
+        reject(new Error("curl sin status: " + (err || `exit ${closeCode}`)));
         return;
       }
       const tail = out.slice(idx + 13); // "<httpCode>|<httpConnect>"
       const [codeStr, connectStr] = tail.split("|");
       const httpCode = parseInt(codeStr, 10) || 0;
       const connectCode = parseInt(connectStr, 10) || 0;
+      lastProxyDetail = `http=${httpCode} connect=${connectCode} exit=${closeCode}`;
       // http_connect = respuesta del proxy al túnel HTTPS. 407 = sin saldo / auth.
       if (connectCode === 407 || httpCode === 407) markProxyAuthFail();
       resolve({ status: httpCode, text: out.slice(0, idx) });
     });
   });
 }
+
+// Último detalle técnico del intento por proxy (para diagnóstico en la nube).
+let lastProxyDetail = "";
 
 // ── Salud del proxy (detección de saldo agotado / auth) ─────────────────────
 let proxyAuthFailedAt = 0;
@@ -94,6 +102,14 @@ export interface ProxyHealth {
   ok: boolean;
   code: "ok" | "no_saldo" | "sin_proxy" | "caido";
   message: string;
+  detail?: string; // diagnóstico técnico (exit code de curl, etc.)
+  host?: string; // host del proxy (sin credenciales) para verificar cuál está activo
+}
+
+// Host del proxy sin credenciales (para saber CUÁL proxy está activo sin filtrar la clave).
+function proxyHostSafe(): string {
+  const m = IG_PROXY_URL.match(/@([^/]+)/);
+  return m ? m[1] : IG_PROXY_URL ? "(sin @host)" : "";
 }
 
 // Chequeo activo: intenta un CONNECT por el proxy y lee la respuesta del túnel.
@@ -103,44 +119,41 @@ export async function checkProxyHealth(): Promise<ProxyHealth> {
       configured: false,
       ok: true,
       code: "sin_proxy",
-      message: "Sin proxy configurado (se usa la IP directa; se limita rápido).",
+      message: "No hay proxy configurado (falta IG_PROXY_URL). Se usa la IP directa y se limita rápido.",
+      host: "",
     };
   }
+  const host = proxyHostSafe();
   try {
     const r = await curlRequest("GET", "https://www.instagram.com/robots.txt", {
       "User-Agent": UA_DESKTOP,
     });
     if (proxyAuthRecentlyFailed() || r.status === 407) {
       return {
-        configured: true,
-        ok: false,
-        code: "no_saldo",
+        configured: true, ok: false, code: "no_saldo", host,
+        detail: lastProxyDetail,
         message: "El proxy (Evomi) rechaza la conexión — probablemente se agotó el saldo. Recárgalo para poder analizar.",
       };
     }
-    // Cualquier respuesta HTTP (incluida 200/404/429 de IG) = el proxy funciona.
     if (r.status > 0) {
-      return { configured: true, ok: true, code: "ok", message: "Proxy activo." };
+      return { configured: true, ok: true, code: "ok", host, detail: lastProxyDetail, message: "Proxy activo." };
     }
     return {
-      configured: true,
-      ok: false,
-      code: "caido",
-      message: "El proxy no responde. Revisa Evomi (saldo/estado) o que la variable IG_PROXY_URL esté bien puesta.",
+      configured: true, ok: false, code: "caido", host,
+      detail: lastProxyDetail,
+      message: "El proxy no responde. Revisa Evomi o que la variable IG_PROXY_URL esté bien puesta.",
     };
   } catch {
     if (proxyAuthRecentlyFailed()) {
       return {
-        configured: true,
-        ok: false,
-        code: "no_saldo",
+        configured: true, ok: false, code: "no_saldo", host,
+        detail: lastProxyDetail,
         message: "El proxy (Evomi) rechaza la conexión — probablemente sin saldo. Recárgalo.",
       };
     }
     return {
-      configured: true,
-      ok: false,
-      code: "caido",
+      configured: true, ok: false, code: "caido", host,
+      detail: lastProxyDetail,
       message: "El proxy no responde. Revisa Evomi o que la variable IG_PROXY_URL esté bien puesta.",
     };
   }
