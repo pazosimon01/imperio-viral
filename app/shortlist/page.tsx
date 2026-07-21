@@ -2,6 +2,9 @@ import { queryPosts, POSTS_PAGE_SIZE } from "@/lib/queries";
 import { PostCard } from "@/components/PostCard";
 import { Pagination } from "@/components/Pagination";
 
+// Datos en vivo por workspace → nunca pre-generar en build.
+export const dynamic = "force-dynamic";
+
 export const revalidate = 30;
 
 interface SearchParams {

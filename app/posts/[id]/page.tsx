@@ -14,6 +14,9 @@ import { AdaptButton } from "@/components/AdaptButton";
 import { AnalyzeVideoButton } from "@/components/AnalyzeVideoButton";
 import { getVideoAnalysis } from "@/lib/video-analysis";
 
+// Datos en vivo por workspace → nunca pre-generar en build.
+export const dynamic = "force-dynamic";
+
 export const revalidate = 30;
 
 export default async function PostDetailPage({

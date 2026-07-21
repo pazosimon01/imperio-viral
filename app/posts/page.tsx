@@ -10,6 +10,9 @@ import { FilterBar } from "@/components/FilterBar";
 import { PostCard } from "@/components/PostCard";
 import { Pagination } from "@/components/Pagination";
 
+// Datos en vivo por workspace → nunca pre-generar en build.
+export const dynamic = "force-dynamic";
+
 export const revalidate = 30;
 
 interface SearchParams {

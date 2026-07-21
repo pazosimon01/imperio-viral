@@ -11,6 +11,9 @@ import { SimplePostCard } from "@/components/SimplePostCard";
 import { Pagination } from "@/components/Pagination";
 import { imgProxy } from "@/lib/img";
 
+// Datos en vivo por workspace → nunca pre-generar en build.
+export const dynamic = "force-dynamic";
+
 export const revalidate = 30;
 
 // Mostramos las últimas N publicaciones en una sola página, ordenadas por

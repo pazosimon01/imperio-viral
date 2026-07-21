@@ -3,6 +3,9 @@ import { getAllProfiles } from "@/lib/queries";
 import { imgProxy } from "@/lib/img";
 import { ProfileSearch } from "@/components/ProfileSearch";
 
+// Datos en vivo por workspace → nunca pre-generar en build.
+export const dynamic = "force-dynamic";
+
 export const revalidate = 30;
 
 export default async function ProfilesIndexPage() {
