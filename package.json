@@ -24,8 +24,10 @@
     "start": "next start"
   },
   "dependencies": {
+    "@notionhq/client": "^2.3.0",
     "@supabase/supabase-js": "^2.105.4",
     "apify-client": "^2.12.0",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^16.4.7",
     "next": "^15.1.4",
     "pg": "^8.20.0",

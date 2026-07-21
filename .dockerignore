@@ -1,0 +1,14 @@
+# Nunca meter secretos ni basura pesada en la imagen.
+.env
+.env.*
+.git
+.next
+node_modules
+data
+*.log
+npm-debug.log*
+.DS_Store
+Imperio Viral.command
+acceso-iphone.command
+*.command
+scripts/*.log

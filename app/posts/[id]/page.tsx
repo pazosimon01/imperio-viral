@@ -6,10 +6,13 @@ import { getAdaptation } from "@/lib/adaptation";
 import { TierBadge, EngagementBadge } from "@/components/TierBadge";
 import { MediaViewer } from "@/components/MediaViewer";
 import { DecisionButtons } from "@/components/DecisionButtons";
+import { NotionButton } from "@/components/NotionButton";
 import { BackButton } from "@/components/BackButton";
 import { TranscribeButton } from "@/components/TranscribeButton";
 import { TranscriptionEditor } from "@/components/TranscriptionEditor";
 import { AdaptButton } from "@/components/AdaptButton";
+import { AnalyzeVideoButton } from "@/components/AnalyzeVideoButton";
+import { getVideoAnalysis } from "@/lib/video-analysis";
 
 export const revalidate = 30;
 
@@ -26,6 +29,8 @@ export default async function PostDetailPage({
   const ageDays = ((Date.now() / 1000 - post.postedAt) / 86400).toFixed(1);
   const transcription =
     post.type === "Video" ? await getTranscription(post.id) : null;
+  const videoAnalysis =
+    post.type === "Video" ? await getVideoAnalysis(post.id) : null;
   const adaptation = transcription ? await getAdaptation(post.id) : null;
   // Solo ofrecemos adaptación si el reel NO está en español. Si ya está en es,
   // omitimos el botón (decisión explícita del usuario al elegir el alcance).
@@ -74,6 +79,23 @@ export default async function PostDetailPage({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Análisis visual frame por frame (solo reels) */}
+          {post.type === "Video" && post.videoUrl && (
+            <div className="mt-4">
+              <AnalyzeVideoButton
+                postId={post.id}
+                initialAnalysis={
+                  videoAnalysis
+                    ? {
+                        result: videoAnalysis.result,
+                        framesCount: videoAnalysis.framesCount,
+                      }
+                    : null
+                }
+              />
             </div>
           )}
 
@@ -339,6 +361,19 @@ export default async function PostDetailPage({
               initialDecision={post.decision}
               initialNotes={post.decisionNotes}
             />
+            <div className="mt-3 border-t border-neutral-900 pt-3">
+              <NotionButton postId={post.id} hasAdaptation={!!adaptation} />
+            </div>
+            <div className="mt-3 border-t border-neutral-900 pt-3">
+              <Link
+                href={`/creacion?post=${post.id}&fuente=${encodeURIComponent(
+                  (transcription?.transcription ?? post.caption ?? "").slice(0, 1500),
+                )}`}
+                className="block w-full rounded-md border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-center text-sm font-medium text-amber-200 transition-colors hover:border-amber-500"
+              >
+                ✨ Crear contenido desde este viral
+              </Link>
+            </div>
           </div>
 
           {/* Link a IG */}

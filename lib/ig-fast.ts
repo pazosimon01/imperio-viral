@@ -46,7 +46,7 @@ function curlRequest(
       "--proxy",
       IG_PROXY_URL,
       "-w",
-      "\n__IGSTATUS__%{http_code}",
+      "\n__IGSTATUS__%{http_code}|%{http_connect}",
     ];
     if (method === "POST") args.push("-X", "POST");
     for (const [k, v] of Object.entries(headers)) args.push("-H", `${k}: ${v}`);
@@ -62,15 +62,88 @@ function curlRequest(
     c.on("close", () => {
       const idx = out.lastIndexOf("\n__IGSTATUS__");
       if (idx === -1) {
+        // Sin marcador → falló antes de responder. Si el proxy rechazó la
+        // autenticación (407 en el CONNECT), curl lo dice en stderr.
+        if (/407|proxy auth|CONNECT tunnel failed/i.test(err)) markProxyAuthFail();
         reject(new Error("curl sin status: " + (err || "vacío")));
         return;
       }
-      resolve({
-        status: parseInt(out.slice(idx + 13), 10) || 0,
-        text: out.slice(0, idx),
-      });
+      const tail = out.slice(idx + 13); // "<httpCode>|<httpConnect>"
+      const [codeStr, connectStr] = tail.split("|");
+      const httpCode = parseInt(codeStr, 10) || 0;
+      const connectCode = parseInt(connectStr, 10) || 0;
+      // http_connect = respuesta del proxy al túnel HTTPS. 407 = sin saldo / auth.
+      if (connectCode === 407 || httpCode === 407) markProxyAuthFail();
+      resolve({ status: httpCode, text: out.slice(0, idx) });
     });
   });
+}
+
+// ── Salud del proxy (detección de saldo agotado / auth) ─────────────────────
+let proxyAuthFailedAt = 0;
+function markProxyAuthFail() {
+  proxyAuthFailedAt = Date.now();
+}
+// ¿El proxy rechazó auth (407) en los últimos 2 min? → probable saldo agotado.
+export function proxyAuthRecentlyFailed(): boolean {
+  return PROXY_ENABLED && Date.now() - proxyAuthFailedAt < 120_000;
+}
+
+export interface ProxyHealth {
+  configured: boolean;
+  ok: boolean;
+  code: "ok" | "no_saldo" | "sin_proxy" | "caido";
+  message: string;
+}
+
+// Chequeo activo: intenta un CONNECT por el proxy y lee la respuesta del túnel.
+export async function checkProxyHealth(): Promise<ProxyHealth> {
+  if (!PROXY_ENABLED) {
+    return {
+      configured: false,
+      ok: true,
+      code: "sin_proxy",
+      message: "Sin proxy configurado (se usa la IP directa; se limita rápido).",
+    };
+  }
+  try {
+    const r = await curlRequest("GET", "https://www.instagram.com/robots.txt", {
+      "User-Agent": UA_DESKTOP,
+    });
+    if (proxyAuthRecentlyFailed() || r.status === 407) {
+      return {
+        configured: true,
+        ok: false,
+        code: "no_saldo",
+        message: "El proxy (DataImpulse) rechaza la conexión — probablemente se agotó el saldo. Recárgalo para poder analizar.",
+      };
+    }
+    // Cualquier respuesta HTTP (incluida 200/404/429 de IG) = el proxy funciona.
+    if (r.status > 0) {
+      return { configured: true, ok: true, code: "ok", message: "Proxy activo." };
+    }
+    return {
+      configured: true,
+      ok: false,
+      code: "caido",
+      message: "El proxy no responde. Revisa DataImpulse (saldo/estado) o tu conexión.",
+    };
+  } catch {
+    if (proxyAuthRecentlyFailed()) {
+      return {
+        configured: true,
+        ok: false,
+        code: "no_saldo",
+        message: "El proxy (DataImpulse) rechaza la conexión — probablemente sin saldo. Recárgalo.",
+      };
+    }
+    return {
+      configured: true,
+      ok: false,
+      code: "caido",
+      message: "El proxy no responde. Revisa DataImpulse o tu conexión.",
+    };
+  }
 }
 
 // Hace la request por curl (si hay proxy) o por fetch nativo (directo).
@@ -214,6 +287,12 @@ function igHeaders(ua: string): Record<string, string> {
     Referer: "https://www.instagram.com/",
     Origin: "https://www.instagram.com",
   };
+}
+
+// Expuesto para lib/ig-discover.ts (perfiles relacionados). Reusa el mismo
+// transporte (curl+proxy con fallback) y los mismos headers anti-WAF.
+export async function igFetchJson(url: string, mobile = false): Promise<any> {
+  return igFetch(url, mobile ? UA_MOBILE : UA_DESKTOP);
 }
 
 async function igFetch(url: string, ua: string, attempt = 0): Promise<any> {
