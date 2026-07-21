@@ -77,8 +77,9 @@ function curlRequest(
       const httpCode = parseInt(codeStr, 10) || 0;
       const connectCode = parseInt(connectStr, 10) || 0;
       lastProxyDetail = `http=${httpCode} connect=${connectCode} exit=${closeCode}`;
-      // http_connect = respuesta del proxy al túnel HTTPS. 407 = sin saldo / auth.
-      if (connectCode === 407 || httpCode === 407) markProxyAuthFail();
+      // http_connect = respuesta del proxy al túnel HTTPS. Sin saldo / pago:
+      // 407 (DataImpulse) o 402 Payment Required (Evomi).
+      if ([407, 402].includes(connectCode) || [407, 402].includes(httpCode)) markProxyAuthFail();
       resolve({ status: httpCode, text: out.slice(0, idx) });
     });
   });
