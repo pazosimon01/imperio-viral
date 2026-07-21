@@ -115,7 +115,7 @@ export async function checkProxyHealth(): Promise<ProxyHealth> {
         configured: true,
         ok: false,
         code: "no_saldo",
-        message: "El proxy (DataImpulse) rechaza la conexión — probablemente se agotó el saldo. Recárgalo para poder analizar.",
+        message: "El proxy (Evomi) rechaza la conexión — probablemente se agotó el saldo. Recárgalo para poder analizar.",
       };
     }
     // Cualquier respuesta HTTP (incluida 200/404/429 de IG) = el proxy funciona.
@@ -126,7 +126,7 @@ export async function checkProxyHealth(): Promise<ProxyHealth> {
       configured: true,
       ok: false,
       code: "caido",
-      message: "El proxy no responde. Revisa DataImpulse (saldo/estado) o tu conexión.",
+      message: "El proxy no responde. Revisa Evomi (saldo/estado) o que la variable IG_PROXY_URL esté bien puesta.",
     };
   } catch {
     if (proxyAuthRecentlyFailed()) {
@@ -134,14 +134,14 @@ export async function checkProxyHealth(): Promise<ProxyHealth> {
         configured: true,
         ok: false,
         code: "no_saldo",
-        message: "El proxy (DataImpulse) rechaza la conexión — probablemente sin saldo. Recárgalo.",
+        message: "El proxy (Evomi) rechaza la conexión — probablemente sin saldo. Recárgalo.",
       };
     }
     return {
       configured: true,
       ok: false,
       code: "caido",
-      message: "El proxy no responde. Revisa DataImpulse o tu conexión.",
+      message: "El proxy no responde. Revisa Evomi o que la variable IG_PROXY_URL esté bien puesta.",
     };
   }
 }

@@ -39,12 +39,12 @@ export function ProxyHealthBanner() {
           <p className="mt-1 text-red-300/80">{health.message}</p>
           {health.code === "no_saldo" && (
             <a
-              href="https://dashboard.dataimpulse.com/"
+              href="https://my.evomi.com/"
               target="_blank"
               rel="noopener noreferrer"
               className="mt-2 inline-block rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
             >
-              Recargar DataImpulse ↗
+              Revisar el proxy (Evomi) ↗
             </a>
           )}
         </div>

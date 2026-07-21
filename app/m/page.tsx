@@ -229,19 +229,19 @@ export default function MultiPage() {
             <span className="text-2xl">🚨</span>
             <div className="text-sm">
               <p className="font-semibold text-red-200">
-                Tu proxy (DataImpulse) se quedó sin saldo.
+                Tu proxy (Evomi) se quedó sin saldo.
               </p>
               <p className="mt-1 text-red-300/80">
                 Por eso los perfiles no se están analizando — no es Instagram, es el
-                saldo del proxy. Recárgalo en tu cuenta de DataImpulse y vuelve a intentar.
+                saldo del proxy. Recárgalo en tu cuenta de Evomi y vuelve a intentar.
               </p>
               <a
-                href="https://dashboard.dataimpulse.com/"
+                href="https://my.evomi.com/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-2 inline-block rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
               >
-                Abrir DataImpulse para recargar ↗
+                Abrir Evomi para recargar ↗
               </a>
             </div>
           </div>
