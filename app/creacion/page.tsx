@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type Kind = "carrusel" | "historias" | "guion";
@@ -11,6 +11,8 @@ function CreacionInner() {
   const sp = useSearchParams();
   const [kind, setKind] = useState<Kind>("carrusel");
   const [negocio, setNegocio] = useState(sp.get("negocio") ?? "");
+  const [marcaNombre, setMarcaNombre] = useState<string | null>(null);
+  const [sinMarca, setSinMarca] = useState(false);
   const [fuente, setFuente] = useState(sp.get("idea") ?? sp.get("fuente") ?? "");
   const [creencia, setCreencia] = useState<string>("");
   const [instrucciones, setInstrucciones] = useState("");
@@ -22,6 +24,23 @@ function CreacionInner() {
   const [refining, setRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const [historial, setHistorial] = useState<string[]>([]);
+
+  // Al entrar, carga la MARCA activa y rellena el contexto del negocio solo.
+  useEffect(() => {
+    fetch("/api/brands")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.active) {
+          setMarcaNombre(d.active.nombre);
+          // Solo pre-rellenar si el usuario no trajo un negocio por URL.
+          if (!sp.get("negocio")) setNegocio(d.active.resumen);
+        } else {
+          setSinMarca(true);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function generar(e: React.FormEvent) {
     e.preventDefault();
@@ -186,13 +205,29 @@ function CreacionInner() {
               ))}
             </div>
 
-            <textarea
-              className={`${input} h-20`}
-              placeholder="El negocio/marca: qué vende, a quién, cómo habla. (Pega aquí el contexto — solo esto se usa como verdad, nada se inventa)"
-              value={negocio}
-              onChange={(e) => setNegocio(e.target.value)}
-              required
-            />
+            {/* Marca activa: el contexto sale solo de su perfil guardado. */}
+            {sinMarca ? (
+              <a
+                href="/cerebro"
+                className="rounded-xl border border-purple-800/60 bg-purple-950/30 p-3 text-sm text-purple-200"
+              >
+                🧠 Primero crea tu marca en CEREBRO (2 min) → así el contenido sale a tu medida, no genérico. Toca aquí.
+              </a>
+            ) : (
+              <details className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-3 text-sm">
+                <summary className="cursor-pointer select-none text-neutral-300">
+                  🎯 Usando la marca:{" "}
+                  <strong className="text-white">{marcaNombre ?? "…"}</strong>
+                  <span className="ml-1 text-xs text-neutral-500">(toca para ver/editar el contexto)</span>
+                </summary>
+                <textarea
+                  className={`${input} mt-2 h-24`}
+                  value={negocio}
+                  onChange={(e) => setNegocio(e.target.value)}
+                  placeholder="Contexto del negocio (sale de tu marca; puedes ajustarlo)"
+                />
+              </details>
+            )}
             <textarea
               className={`${input} h-24`}
               placeholder="El material de partida: pega el caption/transcripción del viral que quieres replicar, o escribe tu idea (ej: una de las 10 ideas de CEREBRO)"

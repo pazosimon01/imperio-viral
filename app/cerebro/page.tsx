@@ -60,9 +60,13 @@ export default function CerebroPage() {
       setPct(step.porcentaje ?? 0);
       if (step.listo) {
         setResumen(step.resumen);
+        if (step.nombre) setNombre(step.nombre);
         setTurns((t) => [
           ...t,
-          { role: "cerebro", text: "¡Perfecto! Ya entendí tu negocio. ¿Armo tu estrategia?" },
+          {
+            role: "cerebro",
+            text: `¡Perfecto! Ya entendí ${step.nombre ? `"${step.nombre}"` : "tu negocio"}. Voy a guardarlo como tu marca y armarte la estrategia. ¿Le damos?`,
+          },
         ]);
       } else {
         setTurns((t) => [...t, { role: "cerebro", text: step.pregunta }]);
@@ -91,14 +95,14 @@ export default function CerebroPage() {
       const res = await fetch("/api/cerebro/interview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ finalize: true, resumen }),
+        body: JSON.stringify({ finalize: true, resumen, nombre }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Error generando la estrategia");
       } else {
         setResult(data.strategy.result);
-        setNombre(resumen.split("\n")[0]?.slice(0, 40) ?? "");
+        if (data.brand?.nombre) setNombre(data.brand.nombre);
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {

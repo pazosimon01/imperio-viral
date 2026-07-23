@@ -187,6 +187,7 @@ export interface InterviewResponse {
   listo: boolean; // ¿ya hay suficiente para la estrategia?
   pregunta: string | null; // siguiente pregunta si !listo
   resumen: string | null; // si listo: brief consolidado para la estrategia
+  nombre: string | null; // si listo: nombre del negocio/marca
   porcentaje: number; // 0-100, cuánto entendió del negocio
 }
 
@@ -208,12 +209,16 @@ const INTERVIEW_TOOL = {
         type: "string",
         description: "Si estás listo: resumen del negocio en 4-6 líneas (nombre, qué vende, cliente ideal, problema real, pruebas/voz si las mencionó). Si no: ''.",
       },
+      nombre: {
+        type: "string",
+        description: "Si estás listo: el nombre del negocio o marca (corto, para etiquetar la marca). Si no: ''.",
+      },
       porcentaje: {
         type: "number",
         description: "Qué tan claro tienes el negocio, de 0 a 100.",
       },
     },
-    required: ["listo", "pregunta", "resumen", "porcentaje"],
+    required: ["listo", "pregunta", "resumen", "nombre", "porcentaje"],
   },
 } as const;
 

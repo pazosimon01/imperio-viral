@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getSessionUser } from "@/lib/auth";
+import { listBrands, getActiveBrand } from "@/lib/brands";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,8 @@ const PASOS = [
 export default async function HomePage() {
   const user = await getSessionUser();
   const nombre = user?.displayName?.split(" ")[0];
+  const [brands, activeBrand] = await Promise.all([listBrands(), getActiveBrand()]);
+  const sinMarca = brands.length === 0;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-8">
@@ -71,6 +74,33 @@ export default async function HomePage() {
           lleva de la mano. <span className="text-neutral-200">No necesitas saber nada de marketing.</span>
         </p>
       </section>
+
+      {sinMarca ? (
+        <Link
+          href="/cerebro"
+          className="rounded-2xl border border-purple-700 bg-gradient-to-br from-purple-950/50 to-neutral-950 p-5 text-center transition-transform hover:scale-[1.01]"
+        >
+          <div className="text-2xl">🧠</div>
+          <div className="mt-1 text-lg font-bold">Empieza aquí: crea tu primera marca</div>
+          <p className="mx-auto mt-1 max-w-md text-sm text-neutral-400">
+            Charlamos 2 minutos sobre tu negocio (o el de tu cliente) y lo guardamos.
+            Desde ahí, TODO — estrategia, contenido, búsquedas — sale a su medida, no genérico.
+          </p>
+          <span className="mt-3 inline-block rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white">
+            Crear mi marca →
+          </span>
+        </Link>
+      ) : (
+        <div className="flex items-center justify-center gap-2 text-sm text-neutral-400">
+          Trabajando en:{" "}
+          <span className="rounded-full border border-neutral-700 bg-neutral-900 px-3 py-1 font-medium text-white">
+            {activeBrand?.nombre}
+          </span>
+          <Link href="/cerebro" className="text-purple-400 hover:underline">
+            + otra marca
+          </Link>
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
         {PASOS.map((p) => (

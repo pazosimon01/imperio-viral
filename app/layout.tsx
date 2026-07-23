@@ -2,8 +2,10 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { ApifyUsageBadge } from "@/components/ApifyUsageBadge";
 import { NicheSelector } from "@/components/NicheSelector";
+import { BrandSelector } from "@/components/BrandSelector";
 import { LogoutButton } from "@/components/LogoutButton";
 import { listNiches, getActiveNiche } from "@/lib/niches";
+import { listBrands, getActiveBrand } from "@/lib/brands";
 import { getSessionUser } from "@/lib/auth";
 import "./globals.css";
 
@@ -51,7 +53,12 @@ export default async function RootLayout({
     );
   }
 
-  const [niches, active] = await Promise.all([listNiches(), getActiveNiche()]);
+  const [niches, active, brands, activeBrand] = await Promise.all([
+    listNiches(),
+    getActiveNiche(),
+    listBrands(),
+    getActiveBrand(),
+  ]);
 
   return (
     <html lang="es">
@@ -76,8 +83,11 @@ export default async function RootLayout({
               </Link>
             </nav>
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
-              <NicheSelector niches={niches} activeSlug={active.slug} />
+              <BrandSelector brands={brands} activeId={activeBrand?.id ?? null} />
               <span className="hidden sm:block">
+                <NicheSelector niches={niches} activeSlug={active.slug} />
+              </span>
+              <span className="hidden lg:block">
                 <ApifyUsageBadge />
               </span>
               <LogoutButton />
