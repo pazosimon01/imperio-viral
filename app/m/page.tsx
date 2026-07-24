@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { MultiProfileView, type MultiPost } from "@/components/MultiProfileView";
+import { PescarPanel } from "@/components/PescarPanel";
 
 const POLL_MS = 2500;
 
@@ -348,12 +349,18 @@ export default function MultiPage() {
           </div>
         )
       ) : sorted.length > 0 ? (
-        <MultiProfileView
-          posts={sorted}
-          profilesCount={successCount}
-          errors={permanentes}
-          rateLimited={rateLimited}
-        />
+        <>
+          {/* Pescar con IA: disponible apenas hay publicaciones (aún sin terminar) */}
+          {jobId && sorted.length >= 10 && (
+            <PescarPanel jobId={jobId} totalPosts={sorted.length} />
+          )}
+          <MultiProfileView
+            posts={sorted}
+            profilesCount={successCount}
+            errors={permanentes}
+            rateLimited={rateLimited}
+          />
+        </>
       ) : null}
     </div>
   );
