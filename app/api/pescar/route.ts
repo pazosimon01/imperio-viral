@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getMultiJobSnapshot } from "@/lib/multi-jobs";
 import { getActiveBrand } from "@/lib/brands";
-import { pescarIdeas } from "@/lib/pescar";
+import { createPescaJob } from "@/lib/pescar-profundo";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
 
-// PESCAR IDEAS: filtra con IA los posts de un análisis del Radar contra la
-// memoria de la marca activa. Devuelve solo las ideas replicables, rankeadas.
+// PESCAR IDEAS (profundo): arranca el job que filtra por caption y luego VE
+// los videos candidatos (transcripción + frames) contra la memoria de la
+// marca activa. Devuelve pescaId; el cliente pollea /api/pescar/[id].
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as { jobId?: string };
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error:
-            "Ese análisis ya no está en memoria (se reinició el servidor). Vuelve a lanzar el Radar.",
+            "Ese análisis ya no está disponible. Vuelve a lanzar el Radar y pesca apenas termine (los videos caducan).",
         },
         { status: 404 }
       );
@@ -42,8 +42,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await pescarIdeas(brand, snap.posts);
-    return NextResponse.json({ ok: true, marca: brand.nombre, ...result });
+    const job = createPescaJob(brand, snap.posts);
+    return NextResponse.json({ ok: true, pescaId: job.id, marca: brand.nombre });
   } catch (e) {
     console.error("[pescar]", e);
     return NextResponse.json(

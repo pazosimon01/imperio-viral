@@ -77,7 +77,7 @@ function runOut(cmd: string, args: string[]): Promise<string> {
   });
 }
 
-async function downloadVideo(url: string, dest: string): Promise<void> {
+export async function downloadVideo(url: string, dest: string): Promise<void> {
   await run("curl", [
     "-s",
     "-L",
@@ -95,7 +95,7 @@ async function downloadVideo(url: string, dest: string): Promise<void> {
   });
 }
 
-async function extractFrames(
+export async function extractFrames(
   videoPath: string,
   dir: string
 ): Promise<{ frames: string[]; duration: number }> {

@@ -30,6 +30,7 @@ export interface IdeaPescada {
   razon: string; // por qué sirve (o casi)
   comoAdaptar: string; // cómo replicarla para ESTE cliente
   post: {
+    id: string;
     url: string;
     ownerUsername: string | null;
     caption: string | null;
@@ -39,6 +40,7 @@ export interface IdeaPescada {
     views: number | null;
     mediaType: string | null;
     thumbnailUrl: string | null;
+    videoUrl: string | null; // vivo mientras el scrape sea reciente → reproducible/descargable
   };
 }
 
@@ -215,6 +217,7 @@ export async function pescarIdeas(
         razon: e.razon ?? "",
         comoAdaptar: e.comoAdaptar ?? "",
         post: {
+          id: String(p.id ?? ""),
           url: p.url ?? "#",
           ownerUsername: p.ownerUsername ?? null,
           caption: p.caption ?? null,
@@ -224,6 +227,7 @@ export async function pescarIdeas(
           views: p.views ?? null,
           mediaType: p.mediaType ?? null,
           thumbnailUrl: p.thumbnailUrl ?? null,
+          videoUrl: p.videoUrl ?? null,
         },
       });
     }
