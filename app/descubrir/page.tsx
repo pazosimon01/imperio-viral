@@ -19,6 +19,8 @@ export default function DescubrirPage() {
   const [found, setFound] = useState<Found[]>([]);
   const [done, setDone] = useState(false);
   const [explored, setExplored] = useState(0);
+  const [fase, setFase] = useState<"parecidas" | "hashtags" | "lista">("parecidas");
+  const [usedHashtags, setUsedHashtags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,6 +96,8 @@ export default function DescubrirPage() {
         if (res.ok) {
           setFound(data.found ?? []);
           setExplored(data.explored ?? 0);
+          setFase(data.fase ?? "parecidas");
+          setUsedHashtags(data.usedHashtags ?? []);
           if (data.done) {
             setDone(true);
             return;
@@ -352,7 +356,11 @@ export default function DescubrirPage() {
                   {!done && (
                     <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-400" />
                   )}
-                  {done ? "✅ Listo" : "Buscando perfiles parecidos…"}
+                  {done
+                    ? "✅ Listo"
+                    : fase === "hashtags"
+                    ? "Plan B automático: buscando por los hashtags que usa ese perfil…"
+                    : "Buscando perfiles parecidos…"}
                 </span>
                 <span className="tabular-nums text-neutral-400">
                   {found.length}/{target}
@@ -364,23 +372,29 @@ export default function DescubrirPage() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
+              {!done && fase === "hashtags" && usedHashtags.length > 0 && (
+                <p className="text-xs text-amber-300/90">
+                  Instagram no sugiere “cuentas parecidas” para esta cuenta (pasa con cuentas
+                  chicas). Buscando con sus propios hashtags:{" "}
+                  {usedHashtags.map((t) => `#${t}`).join(" ")} (~30-60s)
+                </p>
+              )}
               {!done && (
                 <p className="text-xs text-neutral-500">
                   Puedes bloquear el teléfono — la búsqueda sigue en el servidor.
                 </p>
               )}
 
-              {/* Terminó sin (casi) nada: decirlo CLARO y ofrecer la vía que sí sirve.
-                  Pasa con cuentas pequeñas: Instagram no les muestra "cuentas parecidas". */}
+              {/* Ni relacionados NI hashtags dieron nada (rarísimo): error visible + salida */}
               {done && found.length === 0 && (
                 <div className="mt-2 flex flex-col gap-2 rounded-lg border border-amber-700 bg-amber-950/40 p-3 text-sm">
                   <p className="text-amber-200">
-                    😕 Instagram no muestra “cuentas parecidas” para{" "}
-                    {explored <= 1 ? "esta cuenta" : "estas cuentas"} — pasa casi siempre con
-                    cuentas pequeñas o locales. <strong className="text-white">No es que esté cargando: no hay de dónde sacar.</strong>
+                    😕 Ni Instagram sugiere cuentas parecidas, ni encontramos hashtags en los
+                    posts de {explored <= 1 ? "esa cuenta" : "esas cuentas"}.
                   </p>
                   <p className="text-amber-300/80">
-                    La vía que sí funciona para tu nicho es <strong>buscar por hashtags</strong> (encuentra ~100 perfiles en segundos).
+                    Escribe los hashtags de tu nicho a mano — esa vía siempre funciona (~100
+                    perfiles en segundos).
                   </p>
                   <button
                     onClick={() => {
@@ -395,10 +409,10 @@ export default function DescubrirPage() {
                   </button>
                 </div>
               )}
-              {done && found.length > 0 && found.length < 15 && (
-                <p className="mt-1 text-xs text-amber-300/80">
-                  💡 Salieron pocos porque estas cuentas casi no tienen “parecidas” en Instagram.
-                  Para encontrar muchos más, usa “# Por hashtags”.
+              {done && usedHashtags.length > 0 && found.length > 0 && (
+                <p className="mt-1 text-xs text-neutral-500">
+                  ℹ️ Esta cuenta no tenía “parecidas” en Instagram, así que se buscó con sus
+                  hashtags: {usedHashtags.map((t) => `#${t}`).join(" ")}
                 </p>
               )}
             </div>
