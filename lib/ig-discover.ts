@@ -53,7 +53,11 @@ export async function fetchRelated(username: string): Promise<DiscoveredProfile[
 // ── Job de descubrimiento (bola de nieve) ───────────────────────────────────
 
 const MAX_DEPTH = 3;
-const PER_SEED_PAUSE_MS = 350;
+// Cuántas cuentas exploramos EN PARALELO por tanda. Con proxy rotativo cada
+// request sale por otra IP, así que el paralelismo no dispara el rate-limit y
+// multiplica la velocidad (cientos de perfiles en ~10s en vez de ~40s).
+const BATCH_SIZE = 6;
+const PER_BATCH_PAUSE_MS = 150;
 
 export interface DiscoverJob {
   id: string;
@@ -79,29 +83,32 @@ function sweep() {
 async function runDiscover(job: DiscoverJob) {
   const seen = new Set<string>(job.seeds.map((s) => s.toLowerCase()));
   try {
-    // Explora en anchura hasta alcanzar el target o agotar la frontera.
-    let depthGuard = 0;
-    while (
-      job.found.length < job.target &&
-      job.frontier.length > 0 &&
-      depthGuard < job.target * 3 + 50
-    ) {
-      depthGuard++;
-      const seedUser = job.frontier.shift()!;
-      const related = await fetchRelated(seedUser);
-      job.explored++;
-      for (const p of related) {
-        if (seen.has(p.username)) continue;
-        seen.add(p.username);
-        job.found.push(p);
-        if (job.found.length <= job.target * MAX_DEPTH) {
-          job.frontier.push(p.username); // los nuevos alimentan la bola de nieve
+    // Explora en anchura, pero cada tanda de cuentas EN PARALELO. El proxy
+    // rota IP por request → paralelizar acelera mucho sin gatillar rate-limit.
+    let guard = 0;
+    const maxGuard = job.target * 3 + 50;
+    while (job.found.length < job.target && job.frontier.length > 0 && guard < maxGuard) {
+      const batch = job.frontier.splice(0, BATCH_SIZE);
+      guard += batch.length;
+
+      const results = await Promise.all(batch.map((u) => fetchRelated(u)));
+      job.explored += batch.length;
+
+      for (const related of results) {
+        for (const p of related) {
+          if (seen.has(p.username)) continue;
+          seen.add(p.username);
+          job.found.push(p);
+          if (job.found.length <= job.target * MAX_DEPTH) {
+            job.frontier.push(p.username); // los nuevos alimentan la bola de nieve
+          }
+          if (job.found.length >= job.target) break;
         }
         if (job.found.length >= job.target) break;
       }
       job.updatedAt = Date.now();
-      if (job.found.length < job.target) {
-        await new Promise((r) => setTimeout(r, PER_SEED_PAUSE_MS));
+      if (job.found.length < job.target && job.frontier.length > 0) {
+        await new Promise((r) => setTimeout(r, PER_BATCH_PAUSE_MS));
       }
     }
   } catch (e) {
