@@ -199,15 +199,15 @@ const INTERVIEW_TOOL = {
     properties: {
       listo: {
         type: "boolean",
-        description: "true solo cuando entiendes: qué vende, a quién, y cuál es el problema real de marketing.",
+        description: "true SOLO cuando cubriste los 10 bloques del plan científico (o el dueño ya no da más información).",
       },
       pregunta: {
         type: "string",
-        description: "Si NO estás listo: UNA sola pregunta, corta, cálida, en lenguaje simple, adaptada a lo que la persona ya dijo. Sin jerga de marketing. Si estás listo: ''.",
+        description: "Si NO estás listo: UNA sola pregunta, corta, cálida, en lenguaje simple, SIEMPRE con 2-3 ejemplos concretos entre paréntesis para que el dueño sepa exactamente qué responder. Si estás listo: ''.",
       },
       resumen: {
         type: "string",
-        description: "Si estás listo: resumen del negocio en 4-6 líneas (nombre, qué vende, cliente ideal, problema real, pruebas/voz si las mencionó). Si no: ''.",
+        description: "Si estás listo: la MEMORIA DE MARCA completa (600-1100 palabras) con EXACTAMENTE estas secciones en este orden: TEMAS DE LA MARCA (núcleo 1-2 + complementarios) · OFERTA Y PUNTO DE ENTRADA (qué vende, cuál empuja, primer paso de bajo riesgo) · MECANISMO ÚNICO (qué hace distinto + POR QUÉ FALLA lo que la gente intenta sola o con otros) · CLIENTE IDEAL (edad, zona, quién decide la compra, y los 4 dolores: lo visible, lo que siente y no dice, lo que otros le dicen, lo que pierde mientras pospone) · FRASES LITERALES DEL CLIENTE (cómo lo dicen ellos, entre comillas) · OBJECIONES Y MITOS DEL SECTOR (formato Mito: \"...\" → Verdad: \"...\") · LO QUE ESTÁ ROTO EN SU INDUSTRIA (prácticas que critica — jamás personas) · VOZ (es X pero no Y porque Z + palabras/temas PROHIBIDOS) · PRUEBAS REALES (años, cifras, casos con nombre+resultado+plazo — SOLO lo que dijo, nada inventado) · URGENCIA REAL VERIFICABLE · RECURSOS PARA GRABAR (quién sale a cámara, locación) · OBJETIVO → CREENCIA QUE FALTA (tradúcelo tú: no compran→confianza / no se animan→autoeficacia / no creen que funcione→solución / comparan→mejor que competencia / lo piensan→ahora). Solo datos que el dueño dijo — cero invención. Si no: ''.",
       },
       nombre: {
         type: "string",
@@ -230,12 +230,28 @@ export async function interviewStep(
     .join("\n");
   const system = `${CEREBRO_SYSTEM}
 
-Ahora estás en MODO ENTREVISTA. Tu trabajo NO es dar la estrategia todavía, sino ENTENDER el negocio conversando, como un consultor cálido que habla con alguien que no sabe nada de marketing.
-REGLAS DE LA ENTREVISTA:
-- Haz UNA sola pregunta por turno. Corta y en lenguaje cotidiano.
-- Adáptate a lo que la persona YA dijo: nunca preguntes algo que ya respondió; profundiza en lo que dijo.
-- No uses palabras como "creencia", "TOFU", "funnel", "avatar" con el usuario.
-- Con 2-4 respuestas suele bastar. Apenas entiendas qué vende, a quién, y qué le duele del marketing (ej: "no me conocen", "me contactan pero no compran", "no sé qué publicar"), marca listo=true.
+Ahora estás en MODO ENTREVISTA. Tu trabajo NO es dar la estrategia todavía, sino construir la MEMORIA DE MARCA: el documento que después usará TODO el sistema (la estrategia, el filtro de ideas virales y la creación de contenido). Eres un consultor cálido con alguien que no sabe nada de marketing.
+
+CÓMO PREGUNTAR (obligatorio):
+- UNA sola pregunta por turno, corta, en lenguaje cotidiano.
+- SIEMPRE con 2-3 ejemplos concretos entre paréntesis, para que el dueño sepa exactamente qué tipo de respuesta dar. MAL: "¿Cuál es tu diferencial?". BIEN: "¿Qué haces distinto a los demás de tu ciudad? (ej: resultados en una sola cita, financiación sin intereses, un equipo/tecnología que nadie más tiene)".
+- Nada de jerga: nunca digas "creencia", "funnel", "avatar", "diferencial", "propuesta de valor".
+- Adáptate a lo que YA dijo: nunca repitas; profundiza con datos que faltan.
+
+GUION DEL PLAN CIENTÍFICO DE MARKETING (los 10 bloques — pregunta lo que falte, UNO por turno, en este orden aproximado). El orden importa: los TEMAS de la marca van ANTES que la historia personal, y la oferta NUNCA dicta los temas (solo tocará el CTA):
+
+1. TEMAS DE LA MARCA (capas): ¿de qué 1-2 temas sabe más que nadie en su zona? (su núcleo, donde tiene credibilidad máxima). Y ¿qué 1-2 temas personales lo hacen cercano y humano, no solo un vendedor? (ej: núcleo "diseño de sonrisa y ortodoncia" + humano "su historia de mamá emprendedora").
+2. OFERTA Y PUNTO DE ENTRADA: qué vende exactamente, cuál servicio le deja más o quiere empujar, y cuál es el primer paso FÁCIL y de bajo riesgo para un cliente nuevo (ej: valoración, diagnóstico, primera cita).
+3. MECANISMO ÚNICO — la pregunta MÁS importante de toda la entrevista: "¿Por qué a tus clientes NO les funcionó lo que intentaron antes, solos o con otros?" La respuesta mecánica ES su diferencia real. Si contesta con un eslogan ("calidad y amor por lo que hago"), repregunta con cariño hasta obtener la razón MECÁNICA (ej: "los demás tratan el síntoma sin diagnosticar la causa; nosotros primero medimos X").
+4. CLIENTE IDEAL Y SUS 4 DOLORES: edad, zona, quién decide la compra; y los 4 dolores — lo que se VE (esconde la sonrisa en fotos), lo que SIENTE y no dice (vergüenza, verse mayor), lo que OTROS le dicen, y qué PIERDE mientras lo sigue posponiendo.
+5. FRASES LITERALES DEL CLIENTE: cómo lo dicen ELLOS, palabra por palabra, en WhatsApp o en consulta (ej: "es que me da pena sonreír", "¿eso duele mucho?"). Pídelas textuales — son oro para los ganchos.
+6. MITOS Y OBJECIONES que escucha siempre (ej: "es carísimo", "se ve falso", "el bicarbonato blanquea igual").
+7. LO QUE ESTÁ ROTO EN SU SECTOR: qué prácticas de su industria le molestan o qué mito quisiera romper públicamente (prácticas y métodos, JAMÁS colegas ni personas).
+8. VOZ Y LÍMITES: cómo quiere sonar y cómo NO, con la razón (ej: "cercana pero no chistosa, porque mis pacientes son mujeres que deciden solas") + palabras o temas PROHIBIDOS (lo que jamás diría, límites legales de su sector).
+9. PRUEBAS REALES: años, cantidad de clientes atendidos, certificaciones, y 1-2 casos concretos con resultado y tiempo (ej: "María, 34, dejó de taparse la boca en 3 meses"). SOLO lo que diga — jamás inventes ni completes cifras.
+10. RECURSOS Y OBJETIVO: quién sale a cámara, dónde graban, si hay testimonios grabables; qué quiere lograr (citas, ventas, seguidores), cómo llegan clientes HOY, y si existe alguna urgencia REAL verificable (agenda llena, cupos reales, sube de precio en fecha concreta).
+
+- Se cubren en 10-12 respuestas. NO marques listo=true sin los 10 bloques, salvo que el dueño ya no dé más. El MECANISMO ÚNICO (3) y los 4 DOLORES (4) son los que más valor aportan a todo el sistema: no los despaches rápido.
 - Sé breve y humano. Una pregunta a la vez.`;
   const user = `Conversación hasta ahora:
 """

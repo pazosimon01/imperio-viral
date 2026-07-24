@@ -121,7 +121,7 @@ puntaje a esos. PERO la narrativa MANDA: métrica altísima con narrativa
 incompatible se descarta igual.
 
 CLIENTE (su memoria de marca):
-${brand.resumen.slice(0, 3500)}`;
+${brand.resumen.slice(0, 6500)}`;
 }
 
 function captionForPrompt(p: AnyPost): string {

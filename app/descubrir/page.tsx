@@ -369,6 +369,38 @@ export default function DescubrirPage() {
                   Puedes bloquear el teléfono — la búsqueda sigue en el servidor.
                 </p>
               )}
+
+              {/* Terminó sin (casi) nada: decirlo CLARO y ofrecer la vía que sí sirve.
+                  Pasa con cuentas pequeñas: Instagram no les muestra "cuentas parecidas". */}
+              {done && found.length === 0 && (
+                <div className="mt-2 flex flex-col gap-2 rounded-lg border border-amber-700 bg-amber-950/40 p-3 text-sm">
+                  <p className="text-amber-200">
+                    😕 Instagram no muestra “cuentas parecidas” para{" "}
+                    {explored <= 1 ? "esta cuenta" : "estas cuentas"} — pasa casi siempre con
+                    cuentas pequeñas o locales. <strong className="text-white">No es que esté cargando: no hay de dónde sacar.</strong>
+                  </p>
+                  <p className="text-amber-300/80">
+                    La vía que sí funciona para tu nicho es <strong>buscar por hashtags</strong> (encuentra ~100 perfiles en segundos).
+                  </p>
+                  <button
+                    onClick={() => {
+                      setJobId(null);
+                      setFound([]);
+                      setDone(false);
+                      setModo("hashtags");
+                    }}
+                    className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                  >
+                    # Buscar por hashtags →
+                  </button>
+                </div>
+              )}
+              {done && found.length > 0 && found.length < 15 && (
+                <p className="mt-1 text-xs text-amber-300/80">
+                  💡 Salieron pocos porque estas cuentas casi no tienen “parecidas” en Instagram.
+                  Para encontrar muchos más, usa “# Por hashtags”.
+                </p>
+              )}
             </div>
           )}
 

@@ -82,7 +82,7 @@ export default function CerebroPage() {
     setTurns([
       {
         role: "cerebro",
-        text: "Hola 👋 Soy CEREBRO. Para armarte una estrategia a tu medida, cuéntame con tus palabras: ¿qué vendes y a quién? No te preocupes por sonar técnico.",
+        text: "Hola 👋 Soy CEREBRO. Voy a hacerte unas 10-12 preguntas cortas — son el plan científico de marketing completo, y de eso depende que todo lo demás (ideas, contenido, filtros) salga a tu medida y no genérico.\n\nEmpecemos: ¿qué vendes exactamente y en qué ciudad? (ej: \"clínica dental en Cali, lo que más hacemos es diseño de sonrisa y ortodoncia\", \"vendo cursos de inglés online\", \"barbería en el norte de Bogotá\")",
       },
     ]);
   }

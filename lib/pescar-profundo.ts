@@ -155,7 +155,7 @@ entre más, mejor puntaje. PERO la narrativa MANDA: 20× con narrativa
 incompatible = descartar; 3× con narrativa perfecta puede ser "posible".
 
 CLIENTE (memoria de marca):
-${brand.resumen.slice(0, 3500)}`;
+${brand.resumen.slice(0, 6500)}`;
 }
 
 interface DeepVerdict {
