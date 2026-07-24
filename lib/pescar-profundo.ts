@@ -149,6 +149,11 @@ Juzga por lo VISTO y lo DICHO (no por el caption):
 - ¿Hay una FÓRMULA extraíble (estructura de hook, escenas, texto en pantalla)
   que el cliente pueda grabar con SUS recursos?
 
+MÉTRICA (regla del usuario): te doy cuántas veces su propia audiencia hizo el
+reel. Desde 5× vale la pena de verdad; cerca o encima de 10× es excelente —
+entre más, mejor puntaje. PERO la narrativa MANDA: 20× con narrativa
+incompatible = descartar; 3× con narrativa perfecta puede ser "posible".
+
 CLIENTE (memoria de marca):
 ${brand.resumen.slice(0, 3500)}`;
 }
@@ -184,10 +189,21 @@ async function judgeReel(opts: {
       source: { type: "base64", media_type: "image/jpeg", data: b64 },
     });
   });
-  const er = opts.engagementRate != null ? `${opts.engagementRate}% ER` : "ER desconocido";
+  // Regla del usuario: ER/100 = cuántas veces su propia audiencia hizo el post.
+  const mult = opts.engagementRate != null ? opts.engagementRate / 100 : null;
+  const er =
+    mult != null
+      ? `hizo ${mult.toFixed(1)}× la audiencia del creador${
+          mult >= 10
+            ? " — EXCELENTE (10×+)"
+            : mult >= 5
+            ? " — vale la pena (5×+)"
+            : " — por debajo del umbral de 5× del usuario"
+        }`
+      : "viralidad desconocida (sin datos de seguidores)";
   content.push({
     type: "text",
-    text: `Reel de ${Math.round(opts.duration)}s (${er}${opts.views ? `, ${opts.views} vistas` : ""}).
+    text: `Reel de ${Math.round(opts.duration)}s — VIRALIDAD: ${er}${opts.views ? ` (${opts.views} vistas)` : ""}.
 
 ${opts.transcription ? `TRANSCRIPCIÓN DEL AUDIO:\n"""\n${opts.transcription.slice(0, 2500)}\n"""` : "SIN transcripción de audio — júzgalo por lo visual y el texto en pantalla."}
 ${opts.caption ? `\nCAPTION (secundario, no es el criterio principal):\n"""\n${opts.caption.slice(0, 400)}\n"""` : ""}
@@ -268,22 +284,20 @@ async function runPesca(job: PescaJob, brand: Brand, posts: any[]) {
     const esVideoConUrl = (i: IdeaPescada) =>
       i.post.mediaType === "video" && !!i.post.videoUrl;
 
-    // Candidatos profundos: los videos que pasaron el filtro de texto PRIMERO,
-    // pero el caption NO es confiable (la narrativa vive en el video) → si
-    // quedan cupos, entran los videos de mayor engagement aunque su caption no
-    // dijera nada o hubiera sido descartado. La decisión final la toma el que VE.
-    const winners = quick.ideas.filter(esVideoConUrl);
-    const winnerIds = new Set(winners.map((i) => i.post.id));
+    // Candidatos profundos: por VIRALIDAD REAL. Regla del usuario: vale la
+    // pena desde 5× su audiencia (ER ≥ 500%), excelente desde 10× — entre más,
+    // mejor. El caption NO decide quién entra (la narrativa vive en el video);
+    // el filtro de texto solo aporta contexto si coincide. La narrativa la
+    // juzga el que VE cada video.
+    const quickById = new Map(
+      quick.ideas.filter(esVideoConUrl).map((i) => [i.post.id, i])
+    );
     const allVideos = posts
       .filter((p) => p?.mediaType === "video" && p?.videoUrl)
-      .sort(
-        (a, b) => (b.engagementRate ?? -1) - (a.engagementRate ?? -1)
-      );
-    const backfill = allVideos
-      .filter((p) => !winnerIds.has(String(p.id ?? "")))
-      .slice(0, Math.max(0, MAX_DEEP - winners.length))
-      .map(
-        (p): IdeaPescada => ({
+      .sort((a, b) => (b.engagementRate ?? -1) - (a.engagementRate ?? -1));
+    const candidatos = allVideos.slice(0, MAX_DEEP).map(
+      (p): IdeaPescada =>
+        quickById.get(String(p.id ?? "")) ?? {
           puntaje: 0,
           veredicto: "posible",
           razon: "",
@@ -301,9 +315,8 @@ async function runPesca(job: PescaJob, brand: Brand, posts: any[]) {
             thumbnailUrl: p.thumbnailUrl ?? null,
             videoUrl: p.videoUrl ?? null,
           },
-        })
-      );
-    const candidatos = [...winners, ...backfill].slice(0, MAX_DEEP);
+        }
+    );
     job.ligeras = quick.ideas.filter((i) => !esVideoConUrl(i)).slice(0, 10);
     job.profundoTotal = candidatos.length;
     job.fase = "profunda";

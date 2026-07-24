@@ -114,6 +114,12 @@ FÓRMULA clara que el cliente puede copiar (estructura de hook, formato, ángulo
 "posible" = sirve con ajustes. En "comoAdaptar" sé concreto: qué haría el
 cliente con SU negocio usando esa fórmula.
 
+MÉTRICA DE VIRALIDAD (regla del usuario): el "ER" es engagement vs seguidores.
+Desde 500% (el post hizo 5× su audiencia) hay fórmula viral REAL que vale la
+pena; cerca o encima de 1000% (10×) es excelente — entre más, mejor. Súbele el
+puntaje a esos. PERO la narrativa MANDA: métrica altísima con narrativa
+incompatible se descarta igual.
+
 CLIENTE (su memoria de marca):
 ${brand.resumen.slice(0, 3500)}`;
 }

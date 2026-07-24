@@ -97,6 +97,26 @@ export function PescarPanel({ jobId, totalPosts }: { jobId: string; totalPosts: 
     };
   }, [pescaId]);
 
+  // Regla del usuario: ER/100 = cuántas veces su propia audiencia hizo el post.
+  // ≥5× vale la pena · ≥10× excelente · más = mejor.
+  function ViralidadBadge({ er }: { er: number | null }) {
+    if (er == null) return null;
+    const mult = er / 100;
+    if (mult >= 10)
+      return (
+        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-bold text-emerald-300">
+          ⭐ {mult.toFixed(1)}× su audiencia
+        </span>
+      );
+    if (mult >= 5)
+      return (
+        <span className="rounded-full bg-purple-500/20 px-2 py-0.5 text-xs font-bold text-purple-300">
+          🚀 {mult.toFixed(1)}× su audiencia
+        </span>
+      );
+    return <span className="text-neutral-400">{er}% ER</span>;
+  }
+
   function ideaParaCrear(idea: Idea): string {
     const base = idea.profundo
       ? `Reel de @${idea.post.ownerUsername ?? "?"} (${idea.post.engagementRate ?? "?"}% ER). QUÉ PASA EN EL VIDEO: ${idea.profundo.resumenVideo} QUÉ DICE: ${idea.profundo.queDice} CÓMO REPLICARLO: ${idea.profundo.comoReplicar}`
@@ -218,9 +238,7 @@ export function PescarPanel({ jobId, totalPosts }: { jobId: string; totalPosts: 
                     >
                       @{idea.post.ownerUsername} ↗
                     </a>
-                    {idea.post.engagementRate != null && (
-                      <span className="text-neutral-400">{idea.post.engagementRate}% ER</span>
-                    )}
+                    <ViralidadBadge er={idea.post.engagementRate} />
                   </div>
 
                   {idea.profundo && (
@@ -279,6 +297,7 @@ export function PescarPanel({ jobId, totalPosts }: { jobId: string; totalPosts: 
                       >
                         @{idea.post.ownerUsername} ↗
                       </a>
+                      <ViralidadBadge er={idea.post.engagementRate} />
                     </div>
                     <p className="mt-1 text-neutral-300">{idea.razon}</p>
                     <Link
