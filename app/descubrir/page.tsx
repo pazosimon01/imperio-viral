@@ -22,6 +22,9 @@ export default function DescubrirPage() {
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [modo, setModo] = useState<"cuentas" | "hashtags">("cuentas");
+  const [hashtagText, setHashtagText] = useState("");
+  const [buscandoHash, setBuscandoHash] = useState(false);
 
   async function iniciar() {
     setError(null);
@@ -97,6 +100,46 @@ export default function DescubrirPage() {
     router.push("/m?from=session&n=48");
   }
 
+  // Descubrir por HASHTAGS (vía Apify) — reemplazo del scraper viejo de Chrome.
+  async function buscarPorHashtag() {
+    setError(null);
+    const hashtags = hashtagText
+      .split(/[\s,;\n]+/)
+      .map((h) => h.trim().replace(/^#+/, ""))
+      .filter(Boolean);
+    if (hashtags.length === 0) {
+      setError("Escribe al menos un hashtag (ej: botox, diseñodesonrisa).");
+      return;
+    }
+    setBuscandoHash(true);
+    setFound([]);
+    setDone(false);
+    try {
+      const res = await fetch("/api/discover-hashtag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hashtags, porHashtag: 60 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "No se pudo buscar");
+      } else {
+        setFound(
+          (data.profiles ?? []).map((p: { username: string; fullName: string | null }) => ({
+            username: p.username,
+            fullName: p.fullName,
+            isVerified: false,
+            via: "hashtag",
+          }))
+        );
+        setDone(true);
+      }
+    } catch {
+      setError("Error de red");
+    }
+    setBuscandoHash(false);
+  }
+
   const pct = target > 0 ? Math.min(100, Math.round((found.length / target) * 100)) : 0;
 
   return (
@@ -113,79 +156,135 @@ export default function DescubrirPage() {
 
       <ProxyHealthBanner />
 
-      {!jobId && (
+      {!jobId && found.length === 0 && (
         <div className="flex flex-col gap-4 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-neutral-300">
-              Cuentas de ejemplo de tu nicho
-            </label>
-            <textarea
-              value={seedText}
-              onChange={(e) => setSeedText(e.target.value)}
-              rows={2}
-              placeholder="@juanlombana, @pedrosobral"
-              className="w-full rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-sm text-neutral-100 placeholder-neutral-600 focus:border-blue-500 focus:outline-none"
-            />
-            <p className="mt-1.5 text-xs text-neutral-500">
-              💡 Piensa en 1-2 referentes de tu sector. Instagram nos dirá quiénes se le parecen.
-            </p>
+          {/* Elegir el método de descubrimiento */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setModo("hashtags")}
+              className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
+                modo === "hashtags"
+                  ? "border-blue-500 bg-blue-950/40 text-blue-200"
+                  : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:bg-neutral-800"
+              }`}
+            >
+              # Por hashtags
+            </button>
+            <button
+              onClick={() => setModo("cuentas")}
+              className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors ${
+                modo === "cuentas"
+                  ? "border-blue-500 bg-blue-950/40 text-blue-200"
+                  : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:bg-neutral-800"
+              }`}
+            >
+              👥 Por cuentas parecidas
+            </button>
           </div>
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-neutral-300">
-              ¿Cuántos perfiles quieres encontrar?
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {[50, 100, 200, 500].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setTarget(n)}
-                  className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
-                    target === n
-                      ? "border-blue-500 bg-blue-950/50 text-blue-200"
-                      : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:bg-neutral-800"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </div>
-          {error && <p className="text-sm text-red-400">⚠️ {error}</p>}
-          <button
-            onClick={iniciar}
-            className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
-          >
-            🧲 Encontrar perfiles →
-          </button>
+
+          {modo === "hashtags" ? (
+            <>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-neutral-300">
+                  Hashtags de tu nicho
+                </label>
+                <textarea
+                  value={hashtagText}
+                  onChange={(e) => setHashtagText(e.target.value)}
+                  rows={2}
+                  placeholder="botox, diseñodesonrisa, armonizacionfacial"
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-sm text-neutral-100 placeholder-neutral-600 focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1.5 text-xs text-neutral-500">
+                  💡 Como el scraper viejo pero sin Chrome: saca los perfiles que publican en esos hashtags. Rápido y sin riesgo a tu cuenta.
+                </p>
+              </div>
+              {error && <p className="text-sm text-red-400">⚠️ {error}</p>}
+              <button
+                onClick={buscarPorHashtag}
+                disabled={buscandoHash}
+                className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:bg-neutral-700"
+              >
+                {buscandoHash ? "Buscando perfiles… (~1 min)" : "# Encontrar perfiles por hashtag →"}
+              </button>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-neutral-300">
+                  Cuentas de ejemplo de tu nicho
+                </label>
+                <textarea
+                  value={seedText}
+                  onChange={(e) => setSeedText(e.target.value)}
+                  rows={2}
+                  placeholder="@juanlombana, @pedrosobral"
+                  className="w-full rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-sm text-neutral-100 placeholder-neutral-600 focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1.5 text-xs text-neutral-500">
+                  💡 Piensa en 1-2 referentes de tu sector. Instagram nos dirá quiénes se le parecen.
+                </p>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-neutral-300">
+                  ¿Cuántos perfiles quieres encontrar?
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[50, 100, 200, 500].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setTarget(n)}
+                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                        target === n
+                          ? "border-blue-500 bg-blue-950/50 text-blue-200"
+                          : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:bg-neutral-800"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {error && <p className="text-sm text-red-400">⚠️ {error}</p>}
+              <button
+                onClick={iniciar}
+                className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-500"
+              >
+                🧲 Encontrar perfiles →
+              </button>
+            </>
+          )}
         </div>
       )}
 
-      {jobId && (
+      {(jobId || found.length > 0) && (
         <>
-          <div className="flex flex-col gap-2 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2 text-neutral-300">
-                {!done && (
-                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-400" />
-                )}
-                {done ? "✅ Listo" : "Buscando perfiles parecidos…"}
-              </span>
-              <span className="tabular-nums text-neutral-400">
-                {found.length}/{target}
-              </span>
+          {jobId && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-neutral-800 bg-neutral-950 p-5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 text-neutral-300">
+                  {!done && (
+                    <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+                  )}
+                  {done ? "✅ Listo" : "Buscando perfiles parecidos…"}
+                </span>
+                <span className="tabular-nums text-neutral-400">
+                  {found.length}/{target}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              {!done && (
+                <p className="text-xs text-neutral-500">
+                  Puedes bloquear el teléfono — la búsqueda sigue en el servidor.
+                </p>
+              )}
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
-              <div
-                className="h-full rounded-full bg-blue-500 transition-all duration-500"
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            {!done && (
-              <p className="text-xs text-neutral-500">
-                Puedes bloquear el teléfono — la búsqueda sigue en el servidor.
-              </p>
-            )}
-          </div>
+          )}
 
           {found.length > 0 && (
             <div className="sticky top-2 z-10 flex flex-wrap gap-2 rounded-xl border border-neutral-800 bg-neutral-950/90 p-3 backdrop-blur">
@@ -236,6 +335,8 @@ export default function DescubrirPage() {
             <button
               onClick={() => {
                 setJobId(null);
+                setFound([]);
+                setDone(false);
                 setSelected(new Set());
               }}
               className="mx-auto text-sm text-neutral-500 hover:text-neutral-300"
