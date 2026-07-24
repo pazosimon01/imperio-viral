@@ -43,9 +43,24 @@ export default function MultiPage() {
   const [reintentando, setReintentando] = useState(false);
   const [proxySinSaldo, setProxySinSaldo] = useState(false);
   const [servidorReinicio, setServidorReinicio] = useState(false);
+  const [interrumpido, setInterrumpido] = useState(false);
+  const [faltantes, setFaltantes] = useState<string[]>([]);
+  const [continuando, setContinuando] = useState(false);
   const savedRef = useRef(false);
   const creatingRef = useRef(false);
   const gotResultsRef = useRef(false); // ¿ya recibimos posts? (evita closure stale)
+  // Posts acumulados de jobs ANTERIORES (al continuar/reintentar seguimos un job
+  // nuevo — sin esto, el poll del nuevo job pisaría los resultados ya logrados).
+  const basePostsRef = useRef<MultiPost[]>([]);
+  const baseSuccessRef = useRef(0);
+
+  function mergePosts(base: MultiPost[], nuevos: MultiPost[]): MultiPost[] {
+    if (base.length === 0) return nuevos;
+    const map = new Map<string, MultiPost>();
+    for (const p of base) map.set(String(p.id), p);
+    for (const p of nuevos) map.set(String(p.id), p);
+    return [...map.values()];
+  }
 
   // 1) Si no hay job todavía pero sí perfiles → crear el job en el servidor.
   const createJob = useCallback(async () => {
@@ -112,15 +127,17 @@ export default function MultiPage() {
         const data = await res.json();
         if (!alive) return;
         if ((data.posts ?? []).length > 0) gotResultsRef.current = true;
-        setPosts(data.posts ?? []);
+        setPosts(mergePosts(basePostsRef.current, data.posts ?? []));
         setPermanentes(data.permanentes ?? []);
         setTransitorios(data.transitorios ?? []);
         setRateLimited(!!data.rateLimited);
         setRecovering(!!data.recovering);
         setProxySinSaldo(!!data.proxySinSaldo);
+        setInterrumpido(!!data.interrumpido);
+        setFaltantes(data.faltantes ?? []);
         setProcessed(data.processed ?? 0);
         setTotal(data.total ?? total);
-        setSuccessCount(data.successCount ?? 0);
+        setSuccessCount(baseSuccessRef.current + (data.successCount ?? 0));
         if (data.done) {
           setDone(true);
           maybeSaveSearch();
@@ -158,12 +175,9 @@ export default function MultiPage() {
     }).catch(() => {});
   }
 
-  // Reintenta SOLO los que Instagram limitó temporalmente: crea un job nuevo con
-  // esos usernames y cambia a seguirlo. IPs frescas → suelen recuperarse casi todos.
-  async function reintentar() {
-    const users = transitorios.map((u) => u.replace(/^@/, ""));
-    if (users.length === 0 || reintentando) return;
-    setReintentando(true);
+  // Lanza un job nuevo con `users` y cambia a seguirlo, CONSERVANDO los posts y
+  // el conteo de analizados ya logrados (se acumulan en basePostsRef).
+  async function relanzarCon(users: string[]): Promise<boolean> {
     try {
       const res = await fetch("/api/multi-job", {
         method: "POST",
@@ -171,22 +185,45 @@ export default function MultiPage() {
         body: JSON.stringify({ usernames: users, n: rawN }),
       });
       const data = await res.json();
-      if (res.ok) {
-        // Reiniciar estado y seguir el nuevo job (conservando los posts ya logrados).
-        setDone(false);
-        setTransitorios([]);
-        setProcessed(0);
-        setTotal(data.total);
-        savedRef.current = true; // no re-guardar la búsqueda
-        const url = new URL(window.location.href);
-        url.searchParams.set("job", data.jobId);
-        window.history.replaceState(null, "", url.toString());
-        setJobId(data.jobId);
-      }
+      if (!res.ok) return false;
+      basePostsRef.current = posts; // preservar lo ya logrado
+      baseSuccessRef.current = successCount;
+      setDone(false);
+      setTransitorios([]);
+      setInterrumpido(false);
+      setFaltantes([]);
+      setServidorReinicio(false);
+      setProcessed(0);
+      setTotal(data.total);
+      savedRef.current = true; // no re-guardar la búsqueda
+      const url = new URL(window.location.href);
+      url.searchParams.set("job", data.jobId);
+      window.history.replaceState(null, "", url.toString());
+      setJobId(data.jobId);
+      return true;
     } catch {
-      /* noop */
+      return false;
     }
+  }
+
+  // Reintenta SOLO los que Instagram limitó temporalmente. IPs frescas → suelen
+  // recuperarse casi todos.
+  async function reintentar() {
+    const users = transitorios.map((u) => u.replace(/^@/, ""));
+    if (users.length === 0 || reintentando) return;
+    setReintentando(true);
+    await relanzarCon(users);
     setReintentando(false);
+  }
+
+  // Continúa un análisis interrumpido (reinicio del servidor) con TODOS los
+  // perfiles que quedaron sin analizar de la lista original.
+  async function continuar() {
+    const users = faltantes.map((u) => u.replace(/^@/, ""));
+    if (users.length === 0 || continuando) return;
+    setContinuando(true);
+    await relanzarCon(users);
+    setContinuando(false);
   }
 
   const sorted = useMemo(
@@ -214,7 +251,25 @@ export default function MultiPage() {
         </div>
       )}
 
-      {/* Nota suave: el servidor se reinició pero los resultados siguen aquí */}
+      {/* Análisis interrumpido por reinicio: ofrecer CONTINUAR con lo que falta */}
+      {done && interrumpido && faltantes.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-xl border border-blue-700 bg-blue-950/40 p-4 text-sm">
+          <span className="text-blue-200">
+            ⏸️ El análisis se interrumpió (se reinició el servidor).{" "}
+            <strong className="text-white">{successCount} analizados están a salvo</strong> — faltan{" "}
+            <strong className="text-white">{faltantes.length}</strong> de tu lista original.
+          </span>
+          <button
+            onClick={continuar}
+            disabled={continuando}
+            className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-neutral-700"
+          >
+            {continuando ? "Continuando…" : `▶️ Continuar con los ${faltantes.length} que faltan`}
+          </button>
+        </div>
+      )}
+
+      {/* Nota suave: el servidor se reinició y NO hay respaldo (job muy viejo) */}
       {servidorReinicio && sorted.length > 0 && (
         <div className="rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm text-neutral-300">
           ℹ️ El análisis se detuvo porque se reinició el servidor.{" "}
@@ -295,8 +350,9 @@ export default function MultiPage() {
         </div>
       )}
 
-      {/* Aviso de fallos separados por causa, cuando ya terminó y hubo resultados */}
-      {done && sorted.length > 0 && (permanentes.length > 0 || transitorios.length > 0) && (
+      {/* Aviso de fallos separados por causa, cuando ya terminó y hubo resultados.
+          (Si está interrumpido, el botón Continuar de arriba ya cubre los pendientes.) */}
+      {done && !(interrumpido && faltantes.length > 0) && sorted.length > 0 && (permanentes.length > 0 || transitorios.length > 0) && (
         <div className="flex flex-col gap-2 rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-sm">
           {transitorios.length > 0 && (
             <div className="flex flex-col gap-2 rounded-md border border-amber-800/50 bg-amber-950/20 p-3">
