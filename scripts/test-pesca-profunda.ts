@@ -24,7 +24,7 @@ async function main() {
   const t0 = Date.now();
   for (;;) {
     await new Promise((res) => setTimeout(res, 3000));
-    const s = getPescaSnapshot(job.id)!;
+    const s = (await getPescaSnapshot(job.id))!;
     process.stdout.write(
       `\r fase=${s.fase} profundo=${s.profundoDone}/${s.profundoTotal} ideas=${s.ideas.length}   `
     );

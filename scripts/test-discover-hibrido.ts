@@ -10,7 +10,7 @@ async function main() {
   const t0 = Date.now();
   for (;;) {
     await new Promise((r) => setTimeout(r, 3000));
-    const s = getDiscoverSnapshot(job.id)!;
+    const s = (await getDiscoverSnapshot(job.id))!;
     process.stdout.write(
       `\r fase=${s.fase} explorados=${s.explored} encontrados=${s.count} hashtags=[${s.usedHashtags.join(",")}]   `
     );

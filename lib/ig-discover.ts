@@ -13,6 +13,7 @@
 import { randomUUID } from "crypto";
 import { igFetchJson } from "./ig-fast";
 import { runHashtagScrape } from "./apify";
+import { persistJob, loadJobFromDb, sweepJobRows } from "./job-store";
 
 const IG_APP_ID = "936619743392459";
 
@@ -149,6 +150,7 @@ async function runDiscover(job: DiscoverJob) {
         if (job.found.length >= job.target) break;
       }
       job.updatedAt = Date.now();
+      persistJob("discover", job.id, job, job.done);
       if (job.found.length < job.target && job.frontier.length > 0) {
         await new Promise((r) => setTimeout(r, PER_BATCH_PAUSE_MS));
       }
@@ -195,11 +197,13 @@ async function runDiscover(job: DiscoverJob) {
     job.fase = "lista";
     job.done = true;
     job.updatedAt = Date.now();
+    persistJob("discover", job.id, job, true);
   }
 }
 
 export function createDiscoverJob(seeds: string[], target: number): DiscoverJob {
   sweep();
+  sweepJobRows();
   const cleanSeeds = Array.from(
     new Set(
       seeds
@@ -226,9 +230,20 @@ export function createDiscoverJob(seeds: string[], target: number): DiscoverJob 
   return job;
 }
 
-export function getDiscoverSnapshot(id: string) {
-  const job = jobs.get(id);
-  if (!job) return null;
+export async function getDiscoverSnapshot(id: string) {
+  let job = jobs.get(id);
+  if (!job) {
+    // Reinicio/redespliegue: rehidratar de DB. El runner ya no existe → si
+    // estaba a medias, se marca terminado con lo que alcanzó a juntar.
+    const fromDb = await loadJobFromDb<DiscoverJob>("discover", id);
+    if (!fromDb) return null;
+    if (!fromDb.done) {
+      fromDb.done = true;
+      fromDb.fase = "lista";
+    }
+    jobs.set(fromDb.id, fromDb);
+    job = fromDb;
+  }
   job.updatedAt = Date.now();
   return {
     id: job.id,

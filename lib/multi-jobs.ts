@@ -16,6 +16,7 @@ import path from "path";
 import { scanUsernames } from "@/lib/multi-scan";
 import type { ScanPost, FailedProfile } from "@/lib/multi-scan";
 import { proxyAuthRecentlyFailed } from "@/lib/ig-fast";
+import { persistJob, loadJobFromDb, sweepJobRows } from "@/lib/job-store";
 
 const CHUNK = 15; // perfiles por tanda (cada tanda completada se respalda a disco)
 const PAUSE_BETWEEN_CHUNKS_MS = 1_000; // con proxy rotativo no hace falta enfriar tanto
@@ -67,6 +68,16 @@ function fileFor(id: string): string {
   return path.join(JOBS_DIR, `${id}.json`);
 }
 
+// Para la DB guardamos los posts acotados al tope de respuesta (la UI nunca ve
+// más que eso) — así la fila queda liviana aunque el job junte 6000 posts.
+function slimForDb(job: MultiJob): MultiJob {
+  if (job.posts.length <= RESPONSE_POSTS_CAP) return job;
+  const posts = [...job.posts]
+    .sort((a, b) => (b.engagementRate ?? -1) - (a.engagementRate ?? -1))
+    .slice(0, RESPONSE_POSTS_CAP);
+  return { ...job, posts };
+}
+
 function saveToDisk(job: MultiJob) {
   ensureDir();
   try {
@@ -74,6 +85,9 @@ function saveToDisk(job: MultiJob) {
   } catch {
     /* best effort */
   }
+  // DB: el disco de Railway es efímero (cada redespliegue lo borra). La fila
+  // en app_jobs sobrevive a TODO y es la misma para local y nube.
+  persistJob("radar", job.id, slimForDb(job), job.done);
 }
 
 // Rehidrata un job desde disco (tras un reinicio). Si estaba a medias, su
@@ -212,6 +226,7 @@ async function runJob(job: MultiJob, usernames: string[], n: number) {
 
 export function createMultiJob(usernames: string[], n: number): MultiJob {
   sweepOld();
+  sweepJobRows(); // limpia filas viejas en DB (best-effort)
   const list = usernames.slice(0, MAX_USERNAMES);
   const job: MultiJob = {
     id: randomUUID(),
@@ -242,9 +257,26 @@ export function createMultiJob(usernames: string[], n: number): MultiJob {
 
 // Snapshot para el poll. Devuelve los posts ordenados por engagement y
 // acotados, para no mandar megabytes en cada consulta desde el celular.
-export function getMultiJobSnapshot(id: string) {
-  // Memoria primero; si no está (reinicio del server), rehidratamos de disco.
-  const job = jobs.get(id) ?? loadFromDisk(id);
+// Rehidrata de disco (reinicio local) o de DB (redespliegue en la nube).
+async function loadFromAnywhere(id: string): Promise<MultiJob | null> {
+  const fromDisk = loadFromDisk(id);
+  if (fromDisk) return fromDisk;
+  const fromDb = await loadJobFromDb<MultiJob>("radar", id);
+  if (!fromDb) return null;
+  if (!fromDb.done) {
+    fromDb.done = true;
+    fromDb.interrumpido = true;
+    fromDb.recovering = false;
+  }
+  fromDb.updatedAt = Date.now();
+  jobs.set(fromDb.id, fromDb);
+  saveToDisk(fromDb);
+  return fromDb;
+}
+
+export async function getMultiJobSnapshot(id: string) {
+  // Memoria primero; si no está, disco; si tampoco (redespliegue cloud), DB.
+  const job = jobs.get(id) ?? (await loadFromAnywhere(id));
   if (!job) return null;
   job.updatedAt = Date.now(); // el poll cuenta como actividad → no expira mientras lo miras
   const sorted = [...job.posts].sort(

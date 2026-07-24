@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     if (!body.jobId) {
       return NextResponse.json({ error: "Falta jobId." }, { status: 400 });
     }
-    const snap = getMultiJobSnapshot(body.jobId);
+    const snap = await getMultiJobSnapshot(body.jobId);
     if (!snap) {
       return NextResponse.json(
         {

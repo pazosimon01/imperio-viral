@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const snap = getMultiJobSnapshot(id);
+  const snap = await getMultiJobSnapshot(id);
   if (!snap) {
     // El job expiró (TTL) o el servidor se reinició. El cliente debe reiniciar.
     return NextResponse.json({ error: "job no encontrado" }, { status: 404 });

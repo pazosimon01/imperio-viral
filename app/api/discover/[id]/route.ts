@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const snap = getDiscoverSnapshot(id);
+  const snap = await getDiscoverSnapshot(id);
   if (!snap) return NextResponse.json({ error: "job no encontrado" }, { status: 404 });
   return NextResponse.json(snap);
 }

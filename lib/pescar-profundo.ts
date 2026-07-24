@@ -19,6 +19,7 @@ import path from "path";
 import type { Brand } from "./brands";
 import { pescarIdeas, type IdeaPescada } from "./pescar";
 import { downloadVideo, extractFrames } from "./video-analysis";
+import { persistJob, loadJobFromDb, sweepJobRows } from "./job-store";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -351,6 +352,7 @@ async function runPesca(job: PescaJob, brand: Brand, posts: any[]) {
       }
       job.profundoDone++;
       job.updatedAt = Date.now();
+      persistJob("pesca", job.id, job, job.done);
     });
 
     job.fase = "lista";
@@ -359,12 +361,14 @@ async function runPesca(job: PescaJob, brand: Brand, posts: any[]) {
   } finally {
     job.done = true;
     job.updatedAt = Date.now();
+    persistJob("pesca", job.id, job, true);
   }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createPescaJob(brand: Brand, posts: any[]): PescaJob {
   sweep();
+  sweepJobRows();
   const job: PescaJob = {
     id: randomUUID(),
     fase: "rapida",
@@ -386,9 +390,19 @@ export function createPescaJob(brand: Brand, posts: any[]): PescaJob {
   return job;
 }
 
-export function getPescaSnapshot(id: string): PescaJob | null {
-  const job = jobs.get(id);
-  if (!job) return null;
+export async function getPescaSnapshot(id: string): Promise<PescaJob | null> {
+  let job = jobs.get(id);
+  if (!job) {
+    // Reinicio/redespliegue: rehidratar de DB con lo que alcanzó a evaluar.
+    const fromDb = await loadJobFromDb<PescaJob>("pesca", id);
+    if (!fromDb) return null;
+    if (!fromDb.done) {
+      fromDb.done = true;
+      fromDb.fase = "lista";
+    }
+    jobs.set(fromDb.id, fromDb);
+    job = fromDb;
+  }
   job.updatedAt = Date.now();
   return job;
 }

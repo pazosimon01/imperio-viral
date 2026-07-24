@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const snap = getPescaSnapshot(id);
+  const snap = await getPescaSnapshot(id);
   if (!snap) {
     return NextResponse.json({ error: "pesca no encontrada" }, { status: 404 });
   }
