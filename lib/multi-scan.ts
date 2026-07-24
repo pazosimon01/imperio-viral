@@ -6,12 +6,17 @@
 
 import { fetchProfileFast, IgFastError, PROXY_ENABLED } from "@/lib/ig-fast";
 
-// Concurrencia MODERADA a propósito: IG bloquea (401 "espera unos minutos") si
-// llegan demasiadas conexiones juntas desde el pool del proxy. Menos paralelo =
-// más lento pero MUCHÍSIMOS menos bloqueos → más perfiles analizados de verdad.
-export const CONCURRENCY = PROXY_ENABLED ? 3 : 2;
+// Concurrencia: con proxy RESIDENCIAL (Evomi) cada petición sale por una IP
+// distinta, así que el paralelismo alto NO dispara los bloqueos de IG. El valor
+// 3 venía de la era del proxy datacenter (~50% bloqueos); medido 2026-07-23:
+// residencial tarda 2.6-5.3s/petición → un perfil n=48 son ~50s; con 3 en
+// paralelo, 81 perfiles = ~22 min. Con 10 → ~7 min. Sin proxy seguimos en 2.
+export const CONCURRENCY = PROXY_ENABLED ? 10 : 2;
 const MAX_RETRIES = 3;
-const RETRY_PAUSE_MS = PROXY_ENABLED ? 10_000 : 15_000;
+// Con proxy ROTATIVO cada reintento ya sale por IP fresca — no hace falta
+// "enfriar" 10s (eso era para IP fija). Los bloqueos persistentes los cubren
+// las pasadas de recuperación de multi-jobs (45s/90s).
+const RETRY_PAUSE_MS = PROXY_ENABLED ? 2_000 : 15_000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ScanPost = any;

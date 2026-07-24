@@ -17,8 +17,8 @@ import { scanUsernames } from "@/lib/multi-scan";
 import type { ScanPost, FailedProfile } from "@/lib/multi-scan";
 import { proxyAuthRecentlyFailed } from "@/lib/ig-fast";
 
-const CHUNK = 15; // perfiles por tanda
-const PAUSE_BETWEEN_CHUNKS_MS = 2_500;
+const CHUNK = 15; // perfiles por tanda (cada tanda completada se respalda a disco)
+const PAUSE_BETWEEN_CHUNKS_MS = 1_000; // con proxy rotativo no hace falta enfriar tanto
 // IG pide "espera unos minutos" al bloquear. Las pasadas de recuperación esperan
 // de verdad ese tiempo (crece por ronda) para que el bloqueo se levante.
 const RECOVERY_PAUSES_MS = [45_000, 90_000]; // hasta 2 rondas de recuperación

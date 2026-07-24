@@ -39,10 +39,13 @@ function curlRequest(
   return new Promise((resolve, reject) => {
     const args = [
       "-s",
+      // Fallar RÁPIDO: con proxy rotativo, reintentar con IP fresca es más
+      // barato que esperar 45s a una salida lenta (medido: los timeouts largos
+      // eran el mayor freno del barrido).
       "--max-time",
-      "45",
+      "25",
       "--connect-timeout",
-      "15",
+      "10",
       "--proxy",
       IG_PROXY_URL,
       "-w",
@@ -168,7 +171,9 @@ let proxyConsecutiveFails = 0;
 let proxyDisabledUntil = 0;
 
 let lastRequestTime = 0;
-const MIN_REQUEST_GAP_MS = PROXY_ENABLED ? 120 : 350;
+// Con proxy rotativo el gap global puede ser corto: cada request sale por IP
+// distinta. 60ms ≈ máx 16 req/s — suficiente para 10 perfiles en paralelo.
+const MIN_REQUEST_GAP_MS = PROXY_ENABLED ? 60 : 350;
 
 async function rawRequest(
   method: string,
